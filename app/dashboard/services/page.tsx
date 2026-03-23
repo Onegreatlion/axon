@@ -1,41 +1,94 @@
-import { Mail, Calendar, Github, MessageSquare, ExternalLink } from "lucide-react";
+"use client";
 
-const services = [
+import { useState, useEffect } from "react";
+import {
+  Mail,
+  Github,
+  MessageSquare,
+  Check,
+  Loader2,
+  AlertCircle,
+  ExternalLink,
+  Info,
+} from "lucide-react";
+
+interface ServiceConfig {
+  id: string;
+  connectionKey: string | null;
+  connectionName: string | null;
+  name: string;
+  description: string;
+  icon: React.ElementType;
+  scopes: string[];
+  available: boolean;
+}
+
+const services: ServiceConfig[] = [
   {
     id: "gmail",
-    name: "Gmail",
-    description: "Read, draft, and send emails on your behalf.",
+    connectionKey: "google",
+    connectionName: "google-oauth2",
+    name: "Gmail & Calendar",
+    description:
+      "Read, draft, and send emails. View and manage calendar events.",
     icon: Mail,
-    scopes: ["gmail.readonly", "gmail.send", "gmail.modify"],
-    connected: false,
-  },
-  {
-    id: "calendar",
-    name: "Google Calendar",
-    description: "View, create, and manage calendar events.",
-    icon: Calendar,
-    scopes: ["calendar.readonly", "calendar.events"],
-    connected: false,
+    scopes: [
+      "gmail.readonly",
+      "gmail.send",
+      "calendar.events",
+      "calendar.events.readonly",
+    ],
+    available: true,
   },
   {
     id: "github",
+    connectionKey: "github",
+    connectionName: "github",
     name: "GitHub",
     description: "Access repositories, pull requests, and issues.",
     icon: Github,
     scopes: ["repo", "read:org", "read:user"],
-    connected: false,
+    available: false,
   },
   {
     id: "slack",
+    connectionKey: null,
+    connectionName: null,
     name: "Slack",
     description: "Read and send messages across your workspace.",
     icon: MessageSquare,
     scopes: ["channels:read", "chat:write", "im:read"],
-    connected: false,
+    available: false,
   },
 ];
 
 export default function ServicesPage() {
+  const [statuses, setStatuses] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    checkStatuses();
+  }, []);
+
+  async function checkStatuses() {
+    try {
+      const res = await fetch("/api/connections/status");
+      const data = await res.json();
+      if (data.statuses) {
+        setStatuses(data.statuses);
+      }
+    } catch (err) {
+      console.error("Failed to check statuses:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function connectService(connectionName: string) {
+    window.location.href = `/api/connections/connect?connection=${connectionName}`;
+  }
+
   return (
     <div className="h-full flex flex-col">
       <header className="h-14 px-6 flex items-center border-b border-zinc-800/50 shrink-0">
@@ -47,70 +100,134 @@ export default function ServicesPage() {
           <div>
             <p className="text-sm text-zinc-400">
               Connect services to let Axon act on your behalf. Each connection
-              uses OAuth through Auth0 Token Vault. You can review and revoke
-              access at any time.
+              uses OAuth through Auth0 Token Vault. Tokens are stored securely
+              and never pass through this application.
             </p>
           </div>
 
-          <div className="space-y-3">
-            {services.map((service) => (
-              <div
-                key={service.id}
-                className="bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-5"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-3.5">
-                    <div className="w-9 h-9 rounded-lg bg-zinc-800 border border-zinc-700/50 flex items-center justify-center mt-0.5">
-                      <service.icon className="w-4 h-4 text-zinc-400" />
-                    </div>
-                    <div className="space-y-1">
-                      <h3 className="text-sm font-medium text-zinc-200">
-                        {service.name}
-                      </h3>
-                      <p className="text-xs text-zinc-500">
-                        {service.description}
-                      </p>
-                      <div className="flex flex-wrap gap-1.5 pt-1.5">
-                        {service.scopes.map((scope) => (
-                          <span
-                            key={scope}
-                            className="text-[10px] font-mono text-zinc-600 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5"
-                          >
-                            {scope}
-                          </span>
-                        ))}
+          {error && (
+            <div className="flex items-center gap-2 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <p className="text-xs text-red-400">{error}</p>
+            </div>
+          )}
+
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-5 h-5 text-zinc-600 animate-spin" />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {services.map((service) => {
+                const isConnected =
+                  service.connectionKey
+                    ? statuses[service.connectionKey] === true
+                    : false;
+
+                return (
+                  <div
+                    key={service.id}
+                    className={`border rounded-xl p-5 ${
+                      isConnected
+                        ? "bg-emerald-400/5 border-emerald-400/20"
+                        : "bg-zinc-900/50 border-zinc-800/50"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-3.5">
+                        <div
+                          className={`w-9 h-9 rounded-lg border flex items-center justify-center mt-0.5 ${
+                            isConnected
+                              ? "bg-emerald-400/10 border-emerald-400/20"
+                              : "bg-zinc-800 border-zinc-700/50"
+                          }`}
+                        >
+                          <service.icon
+                            className={`w-4 h-4 ${
+                              isConnected
+                                ? "text-emerald-400"
+                                : "text-zinc-400"
+                            }`}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-medium text-zinc-200">
+                              {service.name}
+                            </h3>
+                            {isConnected && (
+                              <span className="text-[10px] font-medium text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 rounded px-1.5 py-0.5">
+                                Connected
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-zinc-500">
+                            {service.description}
+                          </p>
+                          <div className="flex flex-wrap gap-1.5 pt-1.5">
+                            {service.scopes.map((scope) => (
+                              <span
+                                key={scope}
+                                className="text-[10px] font-mono text-zinc-600 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5"
+                              >
+                                {scope}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
                       </div>
+
+                      {service.available && !isConnected && (
+                        <button
+                          onClick={() =>
+                            service.connectionName &&
+                            connectService(service.connectionName)
+                          }
+                          className="text-xs font-medium text-amber-500 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 rounded-lg px-3.5 py-2 transition-colors flex items-center gap-1.5 shrink-0"
+                        >
+                          Connect
+                          <ExternalLink className="w-3 h-3" />
+                        </button>
+                      )}
+
+                      {isConnected && (
+                        <div className="flex items-center gap-1.5 text-xs text-emerald-400 shrink-0">
+                          <Check className="w-3.5 h-3.5" />
+                          Active
+                        </div>
+                      )}
+
+                      {!service.available && (
+                        <span className="text-[10px] text-zinc-600 shrink-0">
+                          Coming soon
+                        </span>
+                      )}
                     </div>
                   </div>
-
-                  <button className="text-xs font-medium text-amber-500 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 rounded-lg px-3.5 py-2 transition-colors flex items-center gap-1.5 shrink-0">
-                    Connect
-                    <ExternalLink className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+          )}
 
           <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-xl p-5">
-            <h3 className="text-xs font-medium text-zinc-400 mb-2">
-              How connections work
+            <h3 className="text-xs font-medium text-zinc-400 mb-2 flex items-center gap-1.5">
+              <Info className="w-3 h-3" />
+              How Token Vault works
             </h3>
             <ul className="space-y-1.5 text-xs text-zinc-600">
               <li>
-                Each service connection initiates an OAuth flow managed by
-                Auth0 Token Vault.
+                Each service uses Auth0 Connected Accounts to securely store
+                OAuth tokens in Token Vault.
               </li>
               <li>
-                Tokens are stored securely in Token Vault, never in this
-                application.
+                Axon retrieves tokens from Token Vault on demand. Tokens never
+                pass through the browser or get stored in this application.
               </li>
               <li>
-                Token refresh is handled automatically. You connect once.
+                Token refresh is handled automatically by Token Vault.
               </li>
               <li>
-                You can disconnect any service instantly. Tokens are revoked
-                immediately.
+                You can disconnect any service to revoke access instantly.
               </li>
             </ul>
           </div>
