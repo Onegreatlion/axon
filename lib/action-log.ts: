@@ -1,0 +1,89 @@
+import { supabaseAdmin } from "@/lib/supabase";
+import { auth0 } from "@/lib/auth0";
+
+export type RiskTier = "observe" | "draft" | "act" | "transact" | "admin";
+
+interface LogEntry {
+  service: string;
+  actionType: string;
+  riskTier: RiskTier;
+  description: string;
+  scopesUsed: string[];
+  status: "pending" | "approved" | "executed" | "denied" | "failed";
+  reasoning?: string;
+  metadata?: Record<string, any>;
+}
+
+export async function logAction(entry: LogEntry) {
+  try {
+    const session = await auth0.getSession();
+    if (!session) return;
+
+    const auth0Id = session.user.sub;
+
+    // Get or create user profile
+    let { data: profile } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id")
+      .eq("auth0_id", auth0Id)
+      .single();
+
+    if (!profile) {
+      const { data: newProfile } = await supabaseAdmin
+        .from("user_profiles")
+        .insert({
+          auth0_id: auth0Id,
+          display_name: session.user.name || "",
+          email: session.user.email || "",
+        })
+        .select("id")
+        .single();
+      profile = newProfile;
+    }
+
+    if (!profile) return;
+
+    await supabaseAdmin.from("action_logs").insert({
+      user_id: profile.id,
+      service: entry.service,
+      action_type: entry.actionType,
+      risk_tier: entry.riskTier,
+      description: entry.description,
+      scopes_used: entry.scopesUsed,
+      status: entry.status,
+      reasoning: entry.reasoning || "",
+      metadata: entry.metadata || {},
+    });
+  } catch (error) {
+    console.error("Failed to log action:", error);
+  }
+}
+
+export async function getActionLogs(limit: number = 50) {
+  try {
+    const session = await auth0.getSession();
+    if (!session) return [];
+
+    const auth0Id = session.user.sub;
+
+    const { data: profile } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id")
+      .eq("auth0_id", auth0Id)
+      .single();
+
+    if (!profile) return [];
+
+    const { data: logs } = await supabaseAdmin
+      .from("action_logs")
+      .select("*")
+      .eq("user_id", profile.id)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    return logs || [];
+  } catch (error) {
+    console.error("Failed to get logs:", error);
+    return [];
+  }
+}

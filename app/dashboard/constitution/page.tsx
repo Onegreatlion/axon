@@ -1,78 +1,174 @@
-import { Plus, GripVertical, ToggleLeft } from "lucide-react";
+"use client";
 
-const defaultRules = [
-  "You may read all my emails but only send replies I have reviewed.",
-  "You may manage my calendar freely except for canceling meetings with external attendees.",
-  "Never post on any platform without my explicit approval.",
-  "Any action involving money or purchases requires my authentication.",
-];
+import { useState, useEffect } from "react";
+import { Plus, X, Loader2, Info } from "lucide-react";
+
+interface Rule {
+  id: string;
+  rule_text: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+}
 
 export default function ConstitutionPage() {
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newRule, setNewRule] = useState("");
+  const [adding, setAdding] = useState(false);
+
+  useEffect(() => {
+    fetchRules();
+  }, []);
+
+  async function fetchRules() {
+    try {
+      const res = await fetch("/api/constitution");
+      const data = await res.json();
+      if (data.rules) {
+        setRules(data.rules);
+      }
+    } catch (err) {
+      console.error("Failed to fetch rules:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function addRule() {
+    if (!newRule.trim() || adding) return;
+    setAdding(true);
+
+    try {
+      const res = await fetch("/api/constitution", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rule_text: newRule }),
+      });
+      const data = await res.json();
+      if (data.rule) {
+        setRules([...rules, data.rule]);
+        setNewRule("");
+      }
+    } catch (err) {
+      console.error("Failed to add rule:", err);
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function removeRule(id: string) {
+    try {
+      await fetch("/api/constitution", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      setRules(rules.filter((r) => r.id !== id));
+    } catch (err) {
+      console.error("Failed to remove rule:", err);
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      addRule();
+    }
+  }
+
   return (
     <div className="h-full flex flex-col">
       <header className="h-14 px-6 flex items-center justify-between border-b border-zinc-800/50 shrink-0">
         <h1 className="text-sm font-medium text-zinc-200">Constitution</h1>
-        <button className="flex items-center gap-1.5 text-xs font-medium text-amber-500 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 rounded-lg px-3 py-1.5 transition-colors">
-          <Plus className="w-3 h-3" />
-          Add rule
-        </button>
+        <span className="text-[10px] text-zinc-600">
+          {rules.length} active rules
+        </span>
       </header>
 
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-2xl mx-auto space-y-6">
           <div>
             <p className="text-sm text-zinc-400">
-              Define what Axon can and cannot do in plain English. Each rule is
-              parsed and mapped to scope restrictions, behavioral constraints,
-              and step-up authentication triggers.
+              Define what Axon can and cannot do in plain English. These rules
+              are checked before every action the agent takes.
             </p>
           </div>
 
-          <div className="space-y-2">
-            {defaultRules.map((rule, index) => (
-              <div
-                key={index}
-                className="flex items-start gap-3 bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-4 group"
-              >
-                <button className="mt-0.5 text-zinc-700 hover:text-zinc-500 cursor-grab">
-                  <GripVertical className="w-3.5 h-3.5" />
-                </button>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-zinc-300">{rule}</p>
-                  <div className="flex items-center gap-3 mt-2.5">
-                    <span className="text-[10px] font-mono text-zinc-600 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5">
-                      Rule {index + 1}
-                    </span>
-                    <span className="text-[10px] text-zinc-600">Active</span>
-                  </div>
-                </div>
-                <button className="text-zinc-700 hover:text-zinc-400 transition-colors">
-                  <ToggleLeft className="w-5 h-5" />
-                </button>
-              </div>
-            ))}
+          {/* Add Rule */}
+          <div className="flex items-start gap-3">
+            <input
+              type="text"
+              value={newRule}
+              onChange={(e) => setNewRule(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Add a rule, e.g. 'Never send emails without my approval'"
+              className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-zinc-700 transition-colors"
+            />
+            <button
+              onClick={addRule}
+              disabled={!newRule.trim() || adding}
+              className="flex items-center gap-1.5 text-xs font-medium text-amber-500 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 rounded-xl px-4 py-3 transition-colors disabled:opacity-30"
+            >
+              {adding ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Plus className="w-3 h-3" />
+              )}
+              Add
+            </button>
           </div>
 
+          {/* Rules List */}
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-5 h-5 text-zinc-600 animate-spin" />
+            </div>
+          ) : rules.length === 0 ? (
+            <div className="text-center py-12 space-y-2">
+              <p className="text-sm text-zinc-600">No rules defined yet.</p>
+              <p className="text-xs text-zinc-700">
+                Add rules to control how Axon behaves.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {rules.map((rule, index) => (
+                <div
+                  key={rule.id}
+                  className="flex items-start gap-3 bg-zinc-900/50 border border-zinc-800/50 rounded-xl p-4 group"
+                >
+                  <span className="text-[10px] font-mono text-zinc-600 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5 mt-0.5 shrink-0">
+                    {index + 1}
+                  </span>
+                  <p className="text-sm text-zinc-300 flex-1">{rule.rule_text}</p>
+                  <button
+                    onClick={() => removeRule(rule.id)}
+                    className="text-zinc-700 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 shrink-0"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="bg-zinc-900/30 border border-zinc-800/50 rounded-xl p-5">
-            <h3 className="text-xs font-medium text-zinc-400 mb-2">
+            <h3 className="text-xs font-medium text-zinc-400 mb-2 flex items-center gap-1.5">
+              <Info className="w-3 h-3" />
               How rules are enforced
             </h3>
             <ul className="space-y-1.5 text-xs text-zinc-600">
               <li>
-                Rules are parsed by the intent classification engine before
-                every agent action.
+                Rules are included in the agent's system prompt and checked
+                before every action.
               </li>
               <li>
-                Restrictions like &quot;never send without approval&quot; map to
-                requiring user confirmation for Act-tier intents.
+                Actions that violate your rules will be blocked or require
+                explicit approval.
               </li>
               <li>
-                Rules mentioning money, deletion, or authentication map to
-                step-up auth triggers.
-              </li>
-              <li>
-                You can reorder rules by priority. Higher rules take
-                precedence in conflicts.
+                Higher-numbered rules take precedence when rules conflict.
               </li>
             </ul>
           </div>
