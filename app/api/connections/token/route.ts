@@ -30,7 +30,8 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       connected: true,
-      accessToken: tokenResponse.accessToken,
+      accessToken: tokenResponse.token,
+      expiresAt: tokenResponse.expiresAt,
       connection: connectionKey,
     });
   } catch (error: any) {
