@@ -4,9 +4,12 @@ import { SERVICE_CONNECTIONS, ConnectionKey } from "@/lib/services/connections";
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await auth0.getSession(request);
+    const session = await auth0.getSession();
     if (!session) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Not authenticated" },
+        { status: 401 }
+      );
     }
 
     const body = await request.json();
@@ -21,7 +24,7 @@ export async function POST(request: NextRequest) {
 
     const config = SERVICE_CONNECTIONS[connectionKey];
 
-    const tokenResponse = await auth0.getAccessTokenForConnection(request, {
+    const tokenResponse = await auth0.getAccessTokenForConnection({
       connection: config.connectionName,
     });
 
