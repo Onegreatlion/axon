@@ -55,9 +55,9 @@ export default function LogsPage() {
   const filteredLogs = logs.filter(
     (log) =>
       !filter ||
-      log.service.includes(filter.toLowerCase()) ||
-      log.action_type.includes(filter.toLowerCase()) ||
-      log.risk_tier.includes(filter.toLowerCase())
+      log.service.toLowerCase().includes(filter.toLowerCase()) ||
+      log.action_type.toLowerCase().includes(filter.toLowerCase()) ||
+      log.risk_tier.toLowerCase().includes(filter.toLowerCase())
   );
 
   function formatTime(dateStr: string) {
@@ -76,19 +76,23 @@ export default function LogsPage() {
     if (date.toDateString() === today.toDateString()) {
       return "Today";
     }
-    return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+    });
   }
 
   return (
     <div className="h-full flex flex-col">
-      <header className="h-14 px-6 flex items-center justify-between border-b border-zinc-800/50 shrink-0">
+      <header className="h-14 px-4 md:px-6 flex items-center justify-between border-b border-zinc-800/50 shrink-0">
         <h1 className="text-sm font-medium text-zinc-200">Action Logs</h1>
         <span className="text-[10px] text-zinc-600">
           {logs.length} actions logged
         </span>
       </header>
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-3xl mx-auto">
+
+      <div className="flex-1 overflow-y-auto p-4 md:p-6">
+        <div className="max-w-4xl mx-auto">
           <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 mb-6">
             <Search className="w-4 h-4 text-zinc-600" />
             <input
@@ -112,56 +116,64 @@ export default function LogsPage() {
               </p>
             </div>
           ) : (
-            <div className="space-y-1">
+            <div className="space-y-3">
               {filteredLogs.map((log) => (
                 <div
                   key={log.id}
-                  className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-zinc-900/50 transition-colors group"
+                  className="rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-4"
                 >
-                  <div className="w-16 shrink-0">
-                    <p className="text-[10px] text-zinc-600">
-                      {formatDate(log.created_at)}
-                    </p>
-                    <p className="text-[10px] font-mono text-zinc-500">
-                      {formatTime(log.created_at)}
-                    </p>
-                  </div>
-                  <div className="w-16 shrink-0">
-                    <span className="text-[10px] font-medium text-zinc-400 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5">
-                      {log.service}
-                    </span>
-                  </div>
-                  <div className="w-20 shrink-0">
-                    <span
-                      className={`text-[10px] font-mono font-medium px-1.5 py-0.5 rounded border ${
-                        tierColors[log.risk_tier] || "text-zinc-400"
-                      }`}
-                    >
-                      {log.risk_tier}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-zinc-400 truncate">
-                      {log.action_type}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {log.scopes_used?.map((scope) => (
-                      <span
-                        key={scope}
-                        className="text-[10px] font-mono text-zinc-600 hidden group-hover:inline"
-                      >
-                        {scope}
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
+                    <div className="flex items-center justify-between md:block md:w-24 shrink-0">
+                      <p className="text-[10px] text-zinc-600">
+                        {formatDate(log.created_at)}
+                      </p>
+                      <p className="text-[10px] font-mono text-zinc-500">
+                        {formatTime(log.created_at)}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-medium text-zinc-400 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5">
+                        {log.service}
                       </span>
-                    ))}
-                    <span
-                      className={`text-[10px] font-medium ${
-                        statusColors[log.status] || "text-zinc-500"
-                      }`}
-                    >
-                      {log.status}
-                    </span>
+                      <span
+                        className={`text-[10px] font-mono font-medium px-1.5 py-0.5 rounded border ${
+                          tierColors[log.risk_tier] || "text-zinc-400"
+                        }`}
+                      >
+                        {log.risk_tier}
+                      </span>
+                      <span
+                        className={`text-[10px] font-medium ${
+                          statusColors[log.status] || "text-zinc-500"
+                        }`}
+                      >
+                        {log.status}
+                      </span>
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-zinc-300 break-words">
+                        {log.action_type}
+                      </p>
+                      <p className="text-[11px] text-zinc-600 mt-1 break-words">
+                        {log.description}
+                      </p>
+                    </div>
                   </div>
+
+                  {log.scopes_used?.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                      {log.scopes_used.map((scope) => (
+                        <span
+                          key={scope}
+                          className="text-[10px] font-mono text-zinc-600 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5"
+                        >
+                          {scope}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
