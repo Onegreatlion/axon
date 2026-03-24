@@ -6,9 +6,16 @@ export async function GET(request: NextRequest) {
     const statuses: Record<string, boolean> = {};
 
     statuses["google"] = await isConnectionActive("google-oauth2");
-    statuses["github"] = false; // Not yet implemented
+    statuses["github"] = false;
 
-    return NextResponse.json({ statuses });
+    return NextResponse.json(
+      { statuses },
+      {
+        headers: {
+          "Cache-Control": "private, max-age=30",
+        },
+      }
+    );
   } catch (error: any) {
     console.error("Status check error:", error.message);
     return NextResponse.json(
