@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, User, Bot } from "lucide-react";
+import { Send, Loader2, User, Trash2 } from "lucide-react";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
+
+const STORAGE_KEY = "axon-chat-messages";
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -14,10 +16,34 @@ export default function Chat() {
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        setMessages(JSON.parse(saved));
+      }
+    } catch {}
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (mounted) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+      } catch {}
+    }
+  }, [messages, mounted]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  function clearChat() {
+    setMessages([]);
+    localStorage.removeItem(STORAGE_KEY);
+  }
 
   async function handleSend() {
     const text = input.trim();
@@ -57,7 +83,7 @@ export default function Chat() {
           { role: "assistant", content: data.message },
         ]);
       }
-    } catch (err: any) {
+    } catch {
       setMessages([
         ...newMessages,
         {
@@ -80,7 +106,6 @@ export default function Chat() {
 
   return (
     <div className="flex-1 flex flex-col">
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-2xl mx-auto space-y-6">
           {messages.length === 0 && (
@@ -163,7 +188,6 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* Input */}
       <div className="p-4 border-t border-zinc-800/50">
         <div className="max-w-2xl mx-auto">
           <div className="flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus-within:border-zinc-700 transition-colors">
@@ -177,6 +201,15 @@ export default function Chat() {
               className="flex-1 bg-transparent text-sm text-zinc-200 placeholder:text-zinc-600 outline-none"
               disabled={loading}
             />
+            {messages.length > 0 && (
+              <button
+                onClick={clearChat}
+                className="text-zinc-600 hover:text-zinc-400 transition-colors"
+                title="Clear chat"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
             <button
               onClick={handleSend}
               disabled={loading || !input.trim()}

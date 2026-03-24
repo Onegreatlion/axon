@@ -21,7 +21,6 @@ export async function logAction(entry: LogEntry) {
 
     const auth0Id = session.user.sub;
 
-    // Get or create user profile
     let { data: profile } = await supabaseAdmin
       .from("user_profiles")
       .select("id")

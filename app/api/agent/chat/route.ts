@@ -5,6 +5,7 @@ import { listEmails, sendEmail, getEmailCount } from "@/lib/services/gmail";
 import { listEvents, createEvent } from "@/lib/services/calendar";
 import { logAction } from "@/lib/action-log";
 import { classifyIntent } from "@/lib/classifier";
+import { supabaseAdmin } from "@/lib/supabase";
 import Groq from "groq-sdk";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -55,7 +56,7 @@ const TOOLS = [
     type: "function" as const,
     function: {
       name: "send_email",
-      description: "Send an email that was previously drafted and approved by the user.",
+      description: "Send an email that was previously drafted and approved by the user. Only call this after the user explicitly says to send.",
       parameters: {
         type: "object",
         properties: {
@@ -103,12 +104,36 @@ const TOOLS = [
   },
 ];
 
-const SYSTEM_PROMPT = `You are Axon, an AI agent that helps users manage their email and calendar. You have access to the user's Gmail and Google Calendar through Auth0 Token Vault.
+async function getConstitutionRules(auth0Id: string): Promise<string[]> {
+  try {
+    const { data: profile } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id")
+      .eq("auth0_id", auth0Id)
+      .single();
 
-Rules:
+    if (!profile) return [];
+
+    const { data: rules } = await supabaseAdmin
+      .from("constitution_rules")
+      .select("rule_text")
+      .eq("user_id", profile.id)
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true });
+
+    return (rules || []).map((r) => r.rule_text);
+  } catch {
+    return [];
+  }
+}
+
+function buildSystemPrompt(constitutionRules: string[]): string {
+  let prompt = `You are Axon, an AI agent that helps users manage their email and calendar. You have access to the user's Gmail and Google Calendar through Auth0 Token Vault.
+
+Core Rules:
 1. When the user asks about their emails, use the email tools to get real data.
 2. When the user asks about their schedule, use the calendar tools.
-3. For sending emails: ALWAYS draft first using draft_email. Present the draft clearly. Only use send_email after the user explicitly approves.
+3. For sending emails: ALWAYS use draft_email first and present the draft to the user. NEVER use send_email unless the user explicitly says "send it", "yes send", "approve", or similar confirmation.
 4. For calendar events: show event details and confirm before creating.
 5. Be concise and direct.
 6. When showing emails, format them clearly with sender, subject, and a brief snippet.
@@ -116,6 +141,17 @@ Rules:
 8. If a tool call fails, explain what happened honestly.
 9. Do not make up data. Only report what the tools return.
 10. Current date and time: ${new Date().toISOString()}`;
+
+  if (constitutionRules.length > 0) {
+    prompt += `\n\nUser Constitution (MUST be obeyed — these rules override all other behavior):`;
+    constitutionRules.forEach((rule, i) => {
+      prompt += `\n${i + 1}. ${rule}`;
+    });
+    prompt += `\n\nIf any action would violate the user's constitution, refuse to do it and explain which rule prevents it.`;
+  }
+
+  return prompt;
+}
 
 async function executeTool(name: string, args: any): Promise<string> {
   const classification = classifyIntent(name);
@@ -193,9 +229,8 @@ async function executeTool(name: string, args: any): Promise<string> {
         result = JSON.stringify({ error: "Unknown tool" });
     }
 
-    // Log successful action
     await logAction({
-      service: name.includes("email") || name.includes("draft") || name.includes("send") ? "gmail" : "calendar",
+      service: name.includes("calendar") ? "calendar" : "gmail",
       actionType: name,
       riskTier: classification.tier,
       description: `${name}(${JSON.stringify(args).substring(0, 200)})`,
@@ -207,9 +242,8 @@ async function executeTool(name: string, args: any): Promise<string> {
 
     return result;
   } catch (error: any) {
-    // Log failed action
     await logAction({
-      service: name.includes("email") || name.includes("draft") || name.includes("send") ? "gmail" : "calendar",
+      service: name.includes("calendar") ? "calendar" : "gmail",
       actionType: name,
       riskTier: classification.tier,
       description: `${name} failed: ${error.message}`,
@@ -232,8 +266,11 @@ export async function POST(request: NextRequest) {
 
     const { messages } = await request.json();
 
+    const constitutionRules = await getConstitutionRules(session.user.sub);
+    const systemPrompt = buildSystemPrompt(constitutionRules);
+
     const chatMessages = [
-      { role: "system" as const, content: SYSTEM_PROMPT },
+      { role: "system" as const, content: systemPrompt },
       ...messages,
     ];
 
@@ -248,7 +285,6 @@ export async function POST(request: NextRequest) {
 
     let assistantMessage = response.choices[0].message;
 
-    // Handle tool calls in a loop
     let iterations = 0;
     while (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0 && iterations < 5) {
       chatMessages.push(assistantMessage);

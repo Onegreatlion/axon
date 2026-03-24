@@ -35,7 +35,7 @@ export default async function Home() {
               Docs
             </Link>
             <a
-              href="https://github.com/YOUR_USERNAME/axon"
+              href="https://github.com/Onegreatlion/axon"
               target="_blank"
               rel="noopener noreferrer"
               className="text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
