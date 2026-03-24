@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return await auth0.connectAccount(request, {
+    return await auth0.connectAccount({
       connection,
     });
   } catch (error: any) {
