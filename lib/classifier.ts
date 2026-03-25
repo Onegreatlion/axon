@@ -1,4 +1,4 @@
-import { RiskTier } from "@/lib/action-log";
+export type RiskTier = "observe" | "draft" | "act" | "transact" | "admin";
 
 interface ClassificationResult {
   tier: RiskTier;
@@ -49,22 +49,27 @@ export function classifyIntent(toolName: string): ClassificationResult {
   if (!rule) {
     return {
       tier: "admin",
-      reasoning: "Unknown action — requires manual review",
+      reasoning: "Unknown action type. Requires manual review.",
       requiresApproval: true,
       requiresStepUp: true,
       scopes: [],
     };
   }
 
-  const requiresApproval = rule.tier === "act" || rule.tier === "transact" || rule.tier === "admin";
-  const requiresStepUp = rule.tier === "transact" || rule.tier === "admin";
+  const requiresApproval =
+    rule.tier === "act" ||
+    rule.tier === "transact" ||
+    rule.tier === "admin";
+
+  const requiresStepUp =
+    rule.tier === "transact" || rule.tier === "admin";
 
   const reasoningMap: Record<RiskTier, string> = {
-    observe: "Read-only access. No data is modified.",
-    draft: "Content created but not sent or published.",
-    act: "This action will modify external resources.",
-    transact: "Irreversible or destructive action.",
-    admin: "Permission or configuration change.",
+    observe: "Read-only access. No data is modified. Auto-approved.",
+    draft: "Content created but not sent or published. Auto-approved.",
+    act: "This action modifies external resources. Requires approval in assist mode.",
+    transact: "Irreversible or destructive action. Always requires approval.",
+    admin: "Permission or configuration change. Always requires manual confirmation.",
   };
 
   return {
