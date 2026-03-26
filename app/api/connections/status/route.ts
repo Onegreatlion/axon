@@ -5,14 +5,21 @@ export async function GET(request: NextRequest) {
   try {
     const statuses: Record<string, boolean> = {};
 
-    statuses["google"] = await isConnectionActive("google-oauth2");
-    statuses["github"] = false;
+    const [google, github] = await Promise.allSettled([
+      isConnectionActive("google-oauth2"),
+      isConnectionActive("github"),
+    ]);
+
+    statuses["google"] =
+      google.status === "fulfilled" ? google.value : false;
+    statuses["github"] =
+      github.status === "fulfilled" ? github.value : false;
 
     return NextResponse.json(
       { statuses },
       {
         headers: {
-          "Cache-Control": "private, max-age=30",
+          "Cache-Control": "private, max-age=15",
         },
       }
     );

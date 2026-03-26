@@ -88,12 +88,53 @@ export default function SettingsPage() {
     saveSettings(activeMode, id);
   }
 
-  async function handleRevoke() {
+  async function handleRevokeAll() {
+    if (
+      !window.confirm(
+        "This will disconnect ALL services and revoke all tokens. Are you sure?"
+      )
+    ) {
+      return;
+    }
+
     setRevoking(true);
-    setTimeout(() => {
-      setRevoking(false);
-      alert("All service connections have been revoked.");
-    }, 1500);
+
+    const results: string[] = [];
+
+    try {
+      const googleRes = await fetch("/api/connections/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connection: "google" }),
+      });
+      const googleData = await googleRes.json();
+      if (googleData.success) {
+        results.push("Google: disconnected");
+      } else {
+        results.push("Google: " + (googleData.error || "failed"));
+      }
+    } catch {
+      results.push("Google: failed to disconnect");
+    }
+
+    try {
+      const githubRes = await fetch("/api/connections/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connection: "github" }),
+      });
+      const githubData = await githubRes.json();
+      if (githubData.success) {
+        results.push("GitHub: disconnected");
+      } else {
+        results.push("GitHub: " + (githubData.error || "failed"));
+      }
+    } catch {
+      results.push("GitHub: failed to disconnect");
+    }
+
+    alert("Revocation results:\n" + results.join("\n") + "\n\nPlease reconnect from the Services page.");
+    setRevoking(false);
   }
 
   if (loading) {
@@ -130,10 +171,10 @@ export default function SettingsPage() {
                 Operating Mode
               </h2>
               <p className="text-xs text-zinc-500 mt-1">
-                Controls how much autonomy Axon has. Changes take effect immediately.
+                Controls how much autonomy Axon has. Changes take effect
+                immediately.
               </p>
             </div>
-
             <div className="space-y-2">
               {modes.map((mode) => (
                 <button
@@ -180,9 +221,9 @@ export default function SettingsPage() {
               </h2>
               <p className="text-xs text-zinc-500 mt-1">
                 How Axon communicates on your behalf when drafting replies.
+                Changes take effect immediately.
               </p>
             </div>
-
             <div className="flex flex-wrap gap-2">
               {tones.map((tone) => (
                 <button
@@ -204,18 +245,16 @@ export default function SettingsPage() {
             <div>
               <h2 className="text-sm font-medium text-red-400">Danger Zone</h2>
             </div>
-
             <button
-              onClick={handleRevoke}
+              onClick={handleRevokeAll}
               disabled={revoking}
               className="w-full sm:w-auto text-xs font-medium text-red-400 bg-red-400/10 border border-red-400/20 hover:bg-red-400/20 rounded-lg px-4 py-2.5 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {revoking && <Loader2 className="w-3 h-3 animate-spin" />}
               Revoke all service connections
             </button>
-
             <p className="text-[10px] text-zinc-600">
-              Immediately disconnects all services and invalidates all tokens
+              Immediately disconnects Google and GitHub, invalidating all tokens
               through Auth0 Token Vault. This action cannot be undone.
             </p>
           </div>

@@ -1,22 +1,10 @@
 import { auth0 } from "@/lib/auth0";
 import { isConnectionActive } from "@/lib/token-vault";
 import { getActionLogs } from "@/lib/action-log";
-import { Circle, Shield, Activity } from "lucide-react";
+import { supabaseAdmin } from "@/lib/supabase";
+import { Circle, ArrowRight } from "lucide-react";
 import Chat from "@/components/chat";
-
-const tierColors: Record<string, string> = {
-  observe: "text-emerald-400",
-  draft: "text-blue-400",
-  act: "text-amber-400",
-  transact: "text-orange-400",
-  admin: "text-red-400",
-};
-
-const statusIcons: Record<string, string> = {
-  executed: "text-emerald-400",
-  failed: "text-red-400",
-  pending: "text-amber-400",
-};
+import StatusPanel from "@/components/status-panel";
 
 export default async function DashboardPage() {
   const session = await auth0.getSession();
@@ -29,10 +17,28 @@ export default async function DashboardPage() {
     googleConnected = false;
   }
 
+  let githubConnected = false;
+  try {
+    githubConnected = await isConnectionActive("github");
+  } catch {
+    githubConnected = false;
+  }
+
+  let mode = "assist";
+  try {
+    const { data: profile } = await supabaseAdmin
+      .from("user_profiles")
+      .select("mode")
+      .eq("auth0_id", session?.user?.sub)
+      .single();
+    if (profile?.mode) {
+      mode = profile.mode;
+    }
+  } catch {}
+
   let recentLogs: any[] = [];
   let totalActions = 0;
   let actionsToday = 0;
-
   try {
     recentLogs = await getActionLogs(10);
     const allLogs = await getActionLogs(500);
@@ -43,249 +49,65 @@ export default async function DashboardPage() {
     ).length;
   } catch {}
 
-  return (
-    <div className="h-full flex flex-col">
-      <header className="hidden md:flex h-14 px-6 items-center justify-between border-b border-zinc-800/50 shrink-0">
-        <h1 className="text-sm font-medium text-zinc-200">Dashboard</h1>
-        <div className="flex items-center gap-2 text-xs text-zinc-500">
-          <Circle className="w-2 h-2 fill-amber-500 text-amber-500" />
-          Assist mode
-        </div>
-      </header>
+  const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
+  const anyConnected = googleConnected || githubConnected;
 
-      {!googleConnected ? (
+  if (!anyConnected) {
+    return (
+      <div className="h-full flex flex-col">
+        <header className="hidden md:flex h-14 px-6 items-center justify-between border-b border-zinc-800/50 shrink-0">
+          <h1 className="text-sm font-medium text-zinc-200">Dashboard</h1>
+        </header>
         <div className="flex-1 flex items-center justify-center p-6">
           <div className="text-center space-y-3 max-w-md">
             <div className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto">
               <div className="w-4 h-4 rounded bg-amber-500/90" />
             </div>
             <h2 className="text-lg font-medium text-zinc-200">
-              Welcome to Axon{user?.name ? `, ${user.name.split(" ")[0]}` : ""}
+              Welcome to Axon
+              {user?.name ? `, ${user.name.split(" ")[0]}` : ""}
             </h2>
             <p className="text-sm text-zinc-500">
-              Connect your Google account to get started. Axon will be able to
-              manage your email and calendar on your behalf.
+              Connect your Google account or GitHub to get started.
             </p>
             <a
               href="/dashboard/services"
               className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-500 hover:text-amber-400 transition-colors mt-2"
             >
               Connect your services
+              <ArrowRight className="w-3 h-3" />
             </a>
           </div>
         </div>
-      ) : (
-        <>
-          <div className="xl:hidden">
-            <Chat />
-            <div className="border-t border-zinc-800/50 bg-zinc-950/40">
-              <div className="px-4 py-3 border-b border-zinc-800/50">
-                <h2 className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
-                  <Activity className="w-3 h-3" />
-                  Status
-                </h2>
-              </div>
+      </div>
+    );
+  }
 
-              <div className="p-4 space-y-4">
-                <div>
-                  <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-2">
-                    Stats
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-lg px-3 py-2">
-                      <p className="text-lg font-medium text-zinc-200">
-                        {actionsToday}
-                      </p>
-                      <p className="text-[10px] text-zinc-600">Today</p>
-                    </div>
-                    <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-lg px-3 py-2">
-                      <p className="text-lg font-medium text-zinc-200">
-                        {totalActions}
-                      </p>
-                      <p className="text-[10px] text-zinc-600">All time</p>
-                    </div>
-                  </div>
-                </div>
+  return (
+    <div className="h-full flex flex-col">
+      <header className="hidden md:flex h-14 px-6 items-center justify-between border-b border-zinc-800/50 shrink-0">
+        <h1 className="text-sm font-medium text-zinc-200">Dashboard</h1>
+        <div className="flex items-center gap-2 text-xs text-zinc-500">
+          <Circle className="w-2 h-2 fill-amber-500 text-amber-500" />
+          {modeLabel} mode
+        </div>
+      </header>
 
-                <div>
-                  <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-2">
-                    Connected Services
-                  </p>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between px-3 py-2 rounded-lg border bg-emerald-400/5 border-emerald-400/20">
-                      <span className="text-xs text-zinc-400">
-                        Gmail & Calendar
-                      </span>
-                      <span className="text-[10px] text-emerald-400">
-                        Active
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-2">
-                    Recent Actions
-                  </p>
-                  {recentLogs.length === 0 ? (
-                    <p className="text-[10px] text-zinc-700">No actions yet</p>
-                  ) : (
-                    <div className="space-y-1">
-                      {recentLogs.slice(0, 8).map((log: any) => (
-                        <div
-                          key={log.id}
-                          className="flex items-center gap-2 px-2 py-1.5 rounded text-[10px]"
-                        >
-                          <span
-                            className={`font-mono font-medium ${
-                              tierColors[log.risk_tier] || "text-zinc-500"
-                            }`}
-                          >
-                            {log.risk_tier.slice(0, 3).toUpperCase()}
-                          </span>
-                          <span className="text-zinc-500 truncate flex-1">
-                            {log.action_type}
-                          </span>
-                          <span
-                            className={`${
-                              statusIcons[log.status] || "text-zinc-600"
-                            }`}
-                          >
-                            {log.status === "executed"
-                              ? "ok"
-                              : log.status === "failed"
-                              ? "err"
-                              : log.status}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-                    <Shield className="w-3 h-3" />
-                    Security
-                  </p>
-                  <div className="space-y-1.5 text-[10px] text-zinc-600">
-                    <p>Tokens stored in Auth0 Token Vault</p>
-                    <p>Scoped access per request</p>
-                    <p>No credentials in this application</p>
-                    <p>Constitution rules enforced</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="hidden xl:grid xl:grid-cols-[minmax(0,1fr)_19rem] flex-1">
-            <div className="min-w-0 border-r border-zinc-800/50">
-              <Chat desktopMode />
-            </div>
-
-            <div className="bg-zinc-950/40">
-              <div className="px-4 py-3 border-b border-zinc-800/50">
-                <h2 className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
-                  <Activity className="w-3 h-3" />
-                  Status
-                </h2>
-              </div>
-
-              <div className="p-4 space-y-4">
-                <div>
-                  <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-2">
-                    Stats
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-lg px-3 py-2">
-                      <p className="text-lg font-medium text-zinc-200">
-                        {actionsToday}
-                      </p>
-                      <p className="text-[10px] text-zinc-600">Today</p>
-                    </div>
-                    <div className="bg-zinc-900/50 border border-zinc-800/50 rounded-lg px-3 py-2">
-                      <p className="text-lg font-medium text-zinc-200">
-                        {totalActions}
-                      </p>
-                      <p className="text-[10px] text-zinc-600">All time</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-2">
-                    Connected Services
-                  </p>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between px-3 py-2 rounded-lg border bg-emerald-400/5 border-emerald-400/20">
-                      <span className="text-xs text-zinc-400">
-                        Gmail & Calendar
-                      </span>
-                      <span className="text-[10px] text-emerald-400">
-                        Active
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-2">
-                    Recent Actions
-                  </p>
-                  {recentLogs.length === 0 ? (
-                    <p className="text-[10px] text-zinc-700">No actions yet</p>
-                  ) : (
-                    <div className="space-y-1">
-                      {recentLogs.slice(0, 8).map((log: any) => (
-                        <div
-                          key={log.id}
-                          className="flex items-center gap-2 px-2 py-1.5 rounded text-[10px]"
-                        >
-                          <span
-                            className={`font-mono font-medium ${
-                              tierColors[log.risk_tier] || "text-zinc-500"
-                            }`}
-                          >
-                            {log.risk_tier.slice(0, 3).toUpperCase()}
-                          </span>
-                          <span className="text-zinc-500 truncate flex-1">
-                            {log.action_type}
-                          </span>
-                          <span
-                            className={`${
-                              statusIcons[log.status] || "text-zinc-600"
-                            }`}
-                          >
-                            {log.status === "executed"
-                              ? "ok"
-                              : log.status === "failed"
-                              ? "err"
-                              : log.status}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-                    <Shield className="w-3 h-3" />
-                    Security
-                  </p>
-                  <div className="space-y-1.5 text-[10px] text-zinc-600">
-                    <p>Tokens stored in Auth0 Token Vault</p>
-                    <p>Scoped access per request</p>
-                    <p>No credentials in this application</p>
-                    <p>Constitution rules enforced</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
+      <div className="flex-1 flex flex-col xl:flex-row overflow-hidden">
+        <div className="flex-1 min-w-0">
+          <Chat />
+        </div>
+        <div className="hidden xl:block w-[19rem] shrink-0 border-l border-zinc-800/50 overflow-y-auto">
+          <StatusPanel
+            mode={modeLabel}
+            googleConnected={googleConnected}
+            githubConnected={githubConnected}
+            actionsToday={actionsToday}
+            totalActions={totalActions}
+            recentLogs={recentLogs}
+          />
+        </div>
+      </div>
     </div>
   );
 }

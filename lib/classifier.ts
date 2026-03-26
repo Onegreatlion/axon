@@ -21,6 +21,30 @@ const TIER_RULES: Record<string, { tier: RiskTier; scopes: string[] }> = {
     tier: "observe",
     scopes: ["calendar.events.readonly"],
   },
+  list_drive_files: {
+    tier: "observe",
+    scopes: ["drive.readonly"],
+  },
+  search_drive_files: {
+    tier: "observe",
+    scopes: ["drive.readonly"],
+  },
+  list_repos: {
+    tier: "observe",
+    scopes: ["repo"],
+  },
+  list_issues: {
+    tier: "observe",
+    scopes: ["repo"],
+  },
+  list_pull_requests: {
+    tier: "observe",
+    scopes: ["repo"],
+  },
+  get_notifications: {
+    tier: "observe",
+    scopes: ["notifications"],
+  },
   draft_email: {
     tier: "draft",
     scopes: ["gmail.send"],
@@ -32,6 +56,14 @@ const TIER_RULES: Record<string, { tier: RiskTier; scopes: string[] }> = {
   create_calendar_event: {
     tier: "act",
     scopes: ["calendar.events"],
+  },
+  create_issue: {
+    tier: "act",
+    scopes: ["repo"],
+  },
+  add_comment: {
+    tier: "act",
+    scopes: ["repo"],
   },
   delete_email: {
     tier: "transact",
@@ -60,7 +92,6 @@ export function classifyIntent(toolName: string): ClassificationResult {
     rule.tier === "act" ||
     rule.tier === "transact" ||
     rule.tier === "admin";
-
   const requiresStepUp =
     rule.tier === "transact" || rule.tier === "admin";
 

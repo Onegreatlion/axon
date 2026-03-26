@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Mail,
   Github,
@@ -9,6 +10,9 @@ import {
   Loader2,
   ExternalLink,
   Info,
+  XCircle,
+  AlertCircle,
+  CheckCircle,
 } from "lucide-react";
 
 interface ServiceConfig {
@@ -27,15 +31,16 @@ const services: ServiceConfig[] = [
     id: "gmail",
     connectionKey: "google",
     connectionName: "google-oauth2",
-    name: "Gmail & Calendar",
+    name: "Gmail, Calendar & Drive",
     description:
-      "Read, draft, and send emails. View and manage calendar events.",
+      "Read, draft, and send emails. View and manage calendar events. Search Google Drive files.",
     icon: Mail,
     scopes: [
       "gmail.readonly",
       "gmail.send",
       "calendar.events",
       "calendar.events.readonly",
+      "drive.readonly",
     ],
     available: true,
   },
@@ -44,10 +49,11 @@ const services: ServiceConfig[] = [
     connectionKey: "github",
     connectionName: "github",
     name: "GitHub",
-    description: "Access repositories, pull requests, and issues.",
+    description:
+      "Access repositories, issues, pull requests, and notifications.",
     icon: Github,
-    scopes: ["repo", "read:org", "read:user"],
-    available: false,
+    scopes: ["repo", "read:org", "read:user", "notifications"],
+    available: true,
   },
   {
     id: "slack",
@@ -62,12 +68,28 @@ const services: ServiceConfig[] = [
 ];
 
 export default function ServicesPage() {
+  const searchParams = useSearchParams();
   const [statuses, setStatuses] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
 
   useEffect(() => {
+    const urlError = searchParams.get("error");
+    const urlConnected = searchParams.get("connected");
+
+    if (urlError) {
+      setError(decodeURIComponent(urlError));
+      window.history.replaceState({}, "", "/dashboard/services");
+    }
+    if (urlConnected) {
+      setSuccess(`${urlConnected} connected successfully.`);
+      window.history.replaceState({}, "", "/dashboard/services");
+    }
+
     checkStatuses();
-  }, []);
+  }, [searchParams]);
 
   async function checkStatuses() {
     try {
@@ -84,7 +106,44 @@ export default function ServicesPage() {
   }
 
   function connectService(connectionName: string) {
+    setError(null);
+    setSuccess(null);
     window.location.href = `/api/connections/connect?connection=${connectionName}`;
+  }
+
+  async function disconnectService(connectionKey: string) {
+    if (
+      !window.confirm(
+        "Disconnect this service? This will revoke all access."
+      )
+    ) {
+      return;
+    }
+
+    setDisconnecting(connectionKey);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const res = await fetch("/api/connections/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connection: connectionKey }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        setStatuses((prev) => ({ ...prev, [connectionKey]: false }));
+        setSuccess("Service disconnected.");
+      } else {
+        setError(data.error || "Failed to disconnect service.");
+      }
+    } catch {
+      setError("Failed to disconnect. Please try again.");
+    } finally {
+      setDisconnecting(null);
+    }
   }
 
   return (
@@ -95,13 +154,25 @@ export default function ServicesPage() {
 
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="max-w-2xl mx-auto space-y-6">
-          <div>
-            <p className="text-sm text-zinc-400">
-              Connect services to let Axon act on your behalf. Each connection
-              uses OAuth through Auth0 Token Vault. Tokens are stored securely
-              and never pass through this application.
-            </p>
-          </div>
+          <p className="text-sm text-zinc-400">
+            Connect services to let Axon act on your behalf. Each connection
+            uses OAuth through Auth0 Token Vault. Tokens are stored securely and
+            never pass through this application.
+          </p>
+
+          {error && (
+            <div className="flex items-start gap-2 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-3">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-red-400">{error}</p>
+            </div>
+          )}
+
+          {success && (
+            <div className="flex items-start gap-2 bg-emerald-400/10 border border-emerald-400/20 rounded-lg px-4 py-3">
+              <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-emerald-400">{success}</p>
+            </div>
+          )}
 
           {loading ? (
             <div className="flex items-center justify-center py-12">
@@ -113,6 +184,8 @@ export default function ServicesPage() {
                 const isConnected = service.connectionKey
                   ? statuses[service.connectionKey] === true
                   : false;
+                const isDisconnecting =
+                  disconnecting === service.connectionKey;
 
                 return (
                   <div
@@ -140,7 +213,6 @@ export default function ServicesPage() {
                             }`}
                           />
                         </div>
-
                         <div className="space-y-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="text-sm font-medium text-zinc-200">
@@ -152,11 +224,9 @@ export default function ServicesPage() {
                               </span>
                             )}
                           </div>
-
                           <p className="text-xs text-zinc-500">
                             {service.description}
                           </p>
-
                           <div className="flex flex-wrap gap-1.5 pt-1.5">
                             {service.scopes.map((scope) => (
                               <span
@@ -170,7 +240,7 @@ export default function ServicesPage() {
                         </div>
                       </div>
 
-                      <div className="shrink-0">
+                      <div className="shrink-0 flex items-center gap-2">
                         {service.available && !isConnected && (
                           <button
                             onClick={() =>
@@ -183,14 +253,29 @@ export default function ServicesPage() {
                             <ExternalLink className="w-3 h-3" />
                           </button>
                         )}
-
                         {isConnected && (
-                          <div className="flex items-center gap-1.5 text-xs text-emerald-400">
-                            <Check className="w-3.5 h-3.5" />
-                            Active
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1.5 text-xs text-emerald-400">
+                              <Check className="w-3.5 h-3.5" />
+                              Active
+                            </div>
+                            <button
+                              onClick={() =>
+                                service.connectionKey &&
+                                disconnectService(service.connectionKey)
+                              }
+                              disabled={isDisconnecting}
+                              className="text-[10px] text-zinc-600 hover:text-red-400 transition-colors flex items-center gap-1 disabled:opacity-50"
+                            >
+                              {isDisconnecting ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <XCircle className="w-3 h-3" />
+                              )}
+                              Disconnect
+                            </button>
                           </div>
                         )}
-
                         {!service.available && (
                           <span className="text-[10px] text-zinc-600">
                             Coming soon
@@ -219,7 +304,10 @@ export default function ServicesPage() {
                 pass through the browser or get stored in this application.
               </li>
               <li>Token refresh is handled automatically by Token Vault.</li>
-              <li>You can disconnect any service to revoke access instantly.</li>
+              <li>
+                You can disconnect any service individually to revoke its access
+                instantly.
+              </li>
             </ul>
           </div>
         </div>

@@ -13,10 +13,12 @@ import {
   PanelLeft,
   X,
   Shield,
+  Activity,
 } from "lucide-react";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: MessageSquare },
+  { name: "Status", href: "/dashboard/status", icon: Activity },
   { name: "Approvals", href: "/dashboard/approvals", icon: Shield },
   { name: "Services", href: "/dashboard/services", icon: Layers },
   { name: "Constitution", href: "/dashboard/constitution", icon: FileText },
