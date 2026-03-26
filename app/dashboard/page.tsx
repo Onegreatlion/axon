@@ -25,15 +25,15 @@ export default async function DashboardPage() {
   }
 
   let mode = "assist";
+  let tone = "professional";
   try {
     const { data: profile } = await supabaseAdmin
       .from("user_profiles")
-      .select("mode")
+      .select("mode, tone")
       .eq("auth0_id", session?.user?.sub)
       .single();
-    if (profile?.mode) {
-      mode = profile.mode;
-    }
+    if (profile?.mode) mode = profile.mode;
+    if (profile?.tone) tone = profile.tone;
   } catch {}
 
   let recentLogs: any[] = [];
@@ -50,12 +50,13 @@ export default async function DashboardPage() {
   } catch {}
 
   const modeLabel = mode.charAt(0).toUpperCase() + mode.slice(1);
+  const toneLabel = tone.charAt(0).toUpperCase() + tone.slice(1);
   const anyConnected = googleConnected || githubConnected;
 
   if (!anyConnected) {
     return (
       <div className="h-full flex flex-col">
-        <header className="hidden md:flex h-14 px-6 items-center justify-between border-b border-zinc-800/50 shrink-0">
+        <header className="h-14 px-4 md:px-6 flex items-center justify-between border-b border-zinc-800/50 shrink-0">
           <h1 className="text-sm font-medium text-zinc-200">Dashboard</h1>
         </header>
         <div className="flex-1 flex items-center justify-center p-6">
@@ -85,11 +86,18 @@ export default async function DashboardPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <header className="hidden md:flex h-14 px-6 items-center justify-between border-b border-zinc-800/50 shrink-0">
+      <header className="h-14 px-4 md:px-6 flex items-center justify-between border-b border-zinc-800/50 shrink-0">
         <h1 className="text-sm font-medium text-zinc-200">Dashboard</h1>
-        <div className="flex items-center gap-2 text-xs text-zinc-500">
-          <Circle className="w-2 h-2 fill-amber-500 text-amber-500" />
-          {modeLabel} mode
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 text-[10px] text-zinc-600">
+            <span className="bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5">
+              {toneLabel}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+            <Circle className="w-2 h-2 fill-amber-500 text-amber-500" />
+            {modeLabel}
+          </div>
         </div>
       </header>
 

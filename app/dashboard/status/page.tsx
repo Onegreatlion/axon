@@ -10,9 +10,12 @@ export default async function StatusPage() {
   let googleConnected = false;
   try {
     googleConnected = await isConnectionActive("google-oauth2");
-  } catch {
-    googleConnected = false;
-  }
+  } catch {}
+
+  let githubConnected = false;
+  try {
+    githubConnected = await isConnectionActive("github");
+  } catch {}
 
   let mode = "assist";
   try {
@@ -29,7 +32,6 @@ export default async function StatusPage() {
   let recentLogs: any[] = [];
   let totalActions = 0;
   let actionsToday = 0;
-
   try {
     recentLogs = await getActionLogs(10);
     const allLogs = await getActionLogs(500);
@@ -51,6 +53,7 @@ export default async function StatusPage() {
         <StatusPanel
           mode={modeLabel}
           googleConnected={googleConnected}
+          githubConnected={githubConnected}
           actionsToday={actionsToday}
           totalActions={totalActions}
           recentLogs={recentLogs}

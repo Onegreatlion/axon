@@ -1,6 +1,7 @@
 import Groq from "groq-sdk";
 
 const GOOGLE_AI_KEY = process.env.GOOGLE_AI_API_KEY;
+const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
 const GROQ_KEY = process.env.GROQ_API_KEY;
 
 interface ChatMessage {
@@ -149,6 +150,84 @@ async function callGemini(
   };
 }
 
+const OPENROUTER_MODELS = [
+  "nousresearch/hermes-3-llama-3.1-405b:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "mistralai/mistral-small-3.1-24b-instruct:free",
+  "openai/gpt-oss-120b:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+];
+
+async function callOpenRouter(
+  messages: ChatMessage[],
+  tools: ToolDef[]
+): Promise<LLMResponse> {
+  let lastError = "";
+
+  for (const model of OPENROUTER_MODELS) {
+    try {
+      const body: any = {
+        model,
+        messages,
+        temperature: 0.3,
+        max_tokens: 1024,
+      };
+
+      if (tools.length > 0) {
+        body.tools = tools;
+        body.tool_choice = "auto";
+      }
+
+      const res = await fetch(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${OPENROUTER_KEY}`,
+          },
+          body: JSON.stringify(body),
+        }
+      );
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        lastError = `${model}: ${res.status} ${errorText}`;
+        console.error(`OpenRouter ${model} failed:`, lastError);
+        continue;
+      }
+
+      const data = await res.json();
+      const msg = data.choices?.[0]?.message;
+
+      if (!msg) {
+        lastError = `${model}: no message in response`;
+        continue;
+      }
+
+      console.log(`OpenRouter: using ${model}`);
+
+      return {
+        content: msg.content || null,
+        tool_calls: (msg.tool_calls || []).map((tc: any) => ({
+          id: tc.id || `call_${Date.now()}`,
+          type: "function" as const,
+          function: {
+            name: tc.function.name,
+            arguments: tc.function.arguments,
+          },
+        })),
+      };
+    } catch (error: any) {
+      lastError = `${model}: ${error.message}`;
+      console.error(`OpenRouter ${model} error:`, error.message);
+      continue;
+    }
+  }
+
+  throw new Error(`All OpenRouter models failed. Last: ${lastError}`);
+}
+
 async function callGroq(
   messages: ChatMessage[],
   tools: ToolDef[]
@@ -186,13 +265,27 @@ export async function chatCompletion(
     try {
       return await callGemini(messages, tools);
     } catch (error: any) {
-      console.error("Gemini failed, falling back to Groq:", error.message);
+      console.error("Gemini failed:", error.message);
+    }
+  }
+
+  if (OPENROUTER_KEY) {
+    try {
+      return await callOpenRouter(messages, tools);
+    } catch (error: any) {
+      console.error("OpenRouter failed:", error.message);
     }
   }
 
   if (GROQ_KEY) {
-    return await callGroq(messages, tools);
+    try {
+      return await callGroq(messages, tools);
+    } catch (error: any) {
+      console.error("Groq failed:", error.message);
+    }
   }
 
-  throw new Error("No AI provider configured");
+  throw new Error(
+    "All AI providers failed or none configured. Check your API keys."
+  );
 }

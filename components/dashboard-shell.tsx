@@ -9,16 +9,15 @@ import {
   FileText,
   ScrollText,
   Settings,
+  Shield,
   LogOut,
   PanelLeft,
   X,
-  Shield,
-  Activity,
+  User,
 } from "lucide-react";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: MessageSquare },
-  { name: "Status", href: "/dashboard/status", icon: Activity },
   { name: "Approvals", href: "/dashboard/approvals", icon: Shield },
   { name: "Services", href: "/dashboard/services", icon: Layers },
   { name: "Constitution", href: "/dashboard/constitution", icon: FileText },
@@ -41,6 +40,7 @@ export default function DashboardShell({
 
   const currentTitle = useMemo(() => {
     const active = navigation.find((item) => pathname === item.href);
+    if (pathname === "/dashboard/profile") return "Profile";
     return active?.name || "Dashboard";
   }, [pathname]);
 
@@ -73,8 +73,11 @@ export default function DashboardShell({
         </nav>
 
         <div className="p-3 border-t border-zinc-800/50">
-          <div className="flex items-center gap-2.5 px-2.5 py-2">
-            <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-medium text-zinc-400">
+          <Link
+            href="/dashboard/profile"
+            className="flex items-center gap-2.5 px-2.5 py-2 rounded-md hover:bg-zinc-800/50 transition-colors group"
+          >
+            <div className="w-7 h-7 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[10px] font-medium text-zinc-400 group-hover:border-zinc-600">
               {userName?.charAt(0)?.toUpperCase() || "U"}
             </div>
             <div className="flex-1 min-w-0">
@@ -83,8 +86,7 @@ export default function DashboardShell({
               </p>
               <p className="text-[10px] text-zinc-600 truncate">{userEmail}</p>
             </div>
-          </div>
-
+          </Link>
           <button
             onClick={() => setLogoutOpen(true)}
             className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors mt-1"
@@ -153,8 +155,12 @@ export default function DashboardShell({
             </nav>
 
             <div className="p-3 border-t border-zinc-800/50">
-              <div className="flex items-center gap-2.5 px-2.5 py-2">
-                <div className="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-medium text-zinc-400">
+              <Link
+                href="/dashboard/profile"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2.5 px-2.5 py-2 rounded-md hover:bg-zinc-800/50 transition-colors"
+              >
+                <div className="w-7 h-7 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-[10px] font-medium text-zinc-400">
                   {userName?.charAt(0)?.toUpperCase() || "U"}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -165,8 +171,7 @@ export default function DashboardShell({
                     {userEmail}
                   </p>
                 </div>
-              </div>
-
+              </Link>
               <button
                 onClick={() => {
                   setOpen(false);
@@ -193,28 +198,25 @@ export default function DashboardShell({
             <p className="text-sm text-zinc-500 mt-2">
               Are you sure you want to sign out of Axon?
             </p>
-
             <div className="flex justify-end gap-2 mt-5">
               <button
                 onClick={() => setLogoutOpen(false)}
                 className="text-xs font-medium text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-lg px-3.5 py-2 hover:text-zinc-200 hover:border-zinc-700 transition-colors"
               >
-                No
+                Cancel
               </button>
               <a
                 href="/auth/logout"
                 className="text-xs font-medium text-zinc-950 bg-amber-500 rounded-lg px-3.5 py-2 hover:bg-amber-400 transition-colors"
               >
-                Yes, sign out
+                Sign out
               </a>
             </div>
           </div>
         </div>
       )}
 
-      <main className="flex-1 min-w-0 pt-14 md:pt-0">
-        {children}
-      </main>
+      <main className="flex-1 min-w-0 pt-14 md:pt-0">{children}</main>
     </div>
   );
 }
