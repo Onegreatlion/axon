@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, User, Trash2 } from "lucide-react";
+import { Send, Loader2, User, Trash2, Mic, MicOff } from "lucide-react";
 
 interface Message {
   role: "user" | "assistant";
@@ -15,8 +15,10 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [showClearDialog, setShowClearDialog] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -50,9 +52,65 @@ export default function Chat() {
     setShowClearDialog(false);
   }
 
+  function toggleListening() {
+    if (isListening) {
+      stopListening();
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert("Speech recognition is not supported in this browser.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event: any) => {
+      let transcript = "";
+      for (let i = 0; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      setInput(transcript);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  }
+
+  function stopListening() {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    setIsListening(false);
+  }
+
   async function handleSend() {
     const text = input.trim();
     if (!text || loading) return;
+
+    if (isListening) {
+      stopListening();
+    }
 
     const userMessage: Message = { role: "user", content: text };
     const newMessages = [...messages, userMessage];
@@ -109,7 +167,10 @@ export default function Chat() {
 
   return (
     <>
-      <div className="flex flex-col" style={{ height: "calc(100dvh - 3.5rem)" }}>
+      <div
+        className="flex flex-col"
+        style={{ height: "calc(100dvh - 3.5rem)" }}
+      >
         <div className="flex-1 overflow-y-auto p-4 md:p-6">
           <div className="max-w-2xl mx-auto space-y-6">
             {messages.length === 0 && (
@@ -179,7 +240,9 @@ export default function Chat() {
                   <div className="w-3 h-3 rounded bg-amber-500/90" />
                 </div>
                 <div className="flex-1 pt-0.5">
-                  <p className="text-xs font-medium text-zinc-500 mb-1">Axon</p>
+                  <p className="text-xs font-medium text-zinc-500 mb-1">
+                    Axon
+                  </p>
                   <div className="flex items-center gap-2 text-sm text-zinc-500">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     Working on it...
@@ -203,17 +266,35 @@ export default function Chat() {
                   <Trash2 className="w-4 h-4" />
                 </button>
               )}
-              <div className="flex-1 flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus-within:border-zinc-700 transition-colors">
+              <div className="flex-1 flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus-within:border-zinc-700 transition-colors">
                 <input
                   ref={inputRef}
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  placeholder="Ask Axon to do something..."
+                  placeholder={
+                    isListening ? "Listening..." : "Ask Axon to do something..."
+                  }
                   className="flex-1 bg-transparent text-sm text-zinc-200 placeholder:text-zinc-600 outline-none"
                   disabled={loading}
                 />
+                <button
+                  onClick={toggleListening}
+                  disabled={loading}
+                  className={`shrink-0 p-1 rounded-lg transition-colors ${
+                    isListening
+                      ? "text-red-400 bg-red-400/10"
+                      : "text-zinc-600 hover:text-zinc-400"
+                  }`}
+                  title={isListening ? "Stop listening" : "Voice input"}
+                >
+                  {isListening ? (
+                    <MicOff className="w-4 h-4" />
+                  ) : (
+                    <Mic className="w-4 h-4" />
+                  )}
+                </button>
                 <button
                   onClick={handleSend}
                   disabled={loading || !input.trim()}
