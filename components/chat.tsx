@@ -17,7 +17,7 @@ export default function Chat() {
   const [showClearDialog, setShowClearDialog] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
   const [mounted, setMounted] = useState(false);
 
@@ -45,6 +45,14 @@ export default function Chat() {
       block: "end",
     });
   }, [messages, loading]);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      const scrollHeight = textareaRef.current.scrollHeight;
+      textareaRef.current.style.height = Math.min(scrollHeight, 150) + "px";
+    }
+  }, [input]);
 
   function clearChat() {
     setMessages([]);
@@ -154,7 +162,7 @@ export default function Chat() {
       ]);
     } finally {
       setLoading(false);
-      inputRef.current?.focus();
+      textareaRef.current?.focus();
     }
   }
 
@@ -197,7 +205,7 @@ export default function Chat() {
                       key={suggestion}
                       onClick={() => {
                         setInput(suggestion);
-                        inputRef.current?.focus();
+                        textareaRef.current?.focus();
                       }}
                       className="text-xs text-zinc-500 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 hover:border-zinc-700 hover:text-zinc-300 transition-colors"
                     >
@@ -256,56 +264,61 @@ export default function Chat() {
 
         <div className="shrink-0 px-4 pb-4 pt-2 border-t border-zinc-800/50 bg-zinc-950">
           <div className="max-w-2xl mx-auto">
-            <div className="flex items-center gap-2">
+            <div className="flex items-end gap-2">
               {messages.length > 0 && (
                 <button
                   onClick={() => setShowClearDialog(true)}
-                  className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-600 hover:text-red-400 hover:border-red-400/30 transition-colors"
+                  className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-600 hover:text-red-400 hover:border-red-400/30 transition-colors mb-[2px]"
                   title="Clear chat history"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
               )}
-              <div className="flex-1 flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 focus-within:border-zinc-700 transition-colors">
-                <input
-                  ref={inputRef}
-                  type="text"
+              <div className="flex-1 flex items-end gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 focus-within:border-zinc-700 transition-colors">
+                <textarea
+                  ref={textareaRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder={
-                    isListening ? "Listening..." : "Ask Axon to do something..."
-                  }
-                  className="flex-1 bg-transparent text-sm text-zinc-200 placeholder:text-zinc-600 outline-none"
-                  disabled={loading}
-                />
-                <button
-                  onClick={toggleListening}
-                  disabled={loading}
-                  className={`shrink-0 p-1 rounded-lg transition-colors ${
                     isListening
-                      ? "text-red-400 bg-red-400/10"
-                      : "text-zinc-600 hover:text-zinc-400"
-                  }`}
-                  title={isListening ? "Stop listening" : "Voice input"}
-                >
-                  {isListening ? (
-                    <MicOff className="w-4 h-4" />
-                  ) : (
-                    <Mic className="w-4 h-4" />
-                  )}
-                </button>
-                <button
-                  onClick={handleSend}
-                  disabled={loading || !input.trim()}
-                  className="text-xs font-medium bg-amber-500 text-zinc-950 px-3 py-1.5 rounded-lg hover:bg-amber-400 transition-colors disabled:opacity-30 disabled:hover:bg-amber-500"
-                >
-                  {loading ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Send className="w-3.5 h-3.5" />
-                  )}
-                </button>
+                      ? "Listening..."
+                      : "Ask Axon to do something..."
+                  }
+                  className="flex-1 bg-transparent text-sm text-zinc-200 placeholder:text-zinc-600 outline-none resize-none py-1 leading-relaxed"
+                  disabled={loading}
+                  rows={1}
+                  style={{ maxHeight: "150px" }}
+                />
+                <div className="flex items-center gap-1 shrink-0 pb-0.5">
+                  <button
+                    onClick={toggleListening}
+                    disabled={loading}
+                    className={`p-1.5 rounded-lg transition-colors ${
+                      isListening
+                        ? "text-red-400 bg-red-400/10"
+                        : "text-zinc-600 hover:text-zinc-400"
+                    }`}
+                    title={isListening ? "Stop listening" : "Voice input"}
+                  >
+                    {isListening ? (
+                      <MicOff className="w-4 h-4" />
+                    ) : (
+                      <Mic className="w-4 h-4" />
+                    )}
+                  </button>
+                  <button
+                    onClick={handleSend}
+                    disabled={loading || !input.trim()}
+                    className="text-xs font-medium bg-amber-500 text-zinc-950 px-3 py-1.5 rounded-lg hover:bg-amber-400 transition-colors disabled:opacity-30 disabled:hover:bg-amber-500"
+                  >
+                    {loading ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Send className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
             <p className="text-[10px] text-zinc-700 mt-1.5 text-center">
