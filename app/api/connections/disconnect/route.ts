@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
     const connectionName =
       connection === "google" ? "google-oauth2" : connection;
 
+    // Get My Account API token
     const tokenRes = await fetch(`https://${DOMAIN}/oauth/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // List connected accounts to find the one to delete
     const accountsRes = await fetch(
       `https://${DOMAIN}/me/v1/connected-accounts/accounts?connection=${connectionName}`,
       {
@@ -69,12 +71,14 @@ export async function POST(request: NextRequest) {
     if (!accountsData.accounts || accountsData.accounts.length === 0) {
       return NextResponse.json({
         success: true,
-        message: "No account found to disconnect",
+        message: "No connected account found to disconnect",
       });
     }
 
+    // Delete ALL connected accounts for this connection
+    const deleteResults = [];
     for (const account of accountsData.accounts) {
-      await fetch(
+      const delRes = await fetch(
         `https://${DOMAIN}/me/v1/connected-accounts/accounts/${account.id}`,
         {
           method: "DELETE",
@@ -83,9 +87,17 @@ export async function POST(request: NextRequest) {
           },
         }
       );
+      deleteResults.push({
+        id: account.id,
+        status: delRes.status,
+      });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true,
+      deleted: deleteResults,
+      message: "Disconnected. Reconnect to grant updated permissions.",
+    });
   } catch (error: any) {
     console.error("Disconnect error:", error);
     return NextResponse.json(

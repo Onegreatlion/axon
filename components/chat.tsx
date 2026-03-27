@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Send, Loader2, User, Trash2, Mic, MicOff, Plus, Copy,
-  Check, ChevronDown, ArrowDown,
+  Check, ChevronDown, ArrowDown, Square,
 } from "lucide-react";
 import Markdown from "@/components/markdown";
 
@@ -10,26 +10,16 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: number;
-  isStreaming?: boolean;
 }
 
 interface ChatSession {
   id: string;
   name: string;
   messages: Message[];
-  createdAt: number;
+  created_at: string;
+  updated_at: string;
 }
 
-const SESSIONS_KEY = "axon-chat-sessions";
-const CURRENT_SESSION_KEY = "axon-current-session";
-const TYPING_SPEED = 12; // ms per character
-
-function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
-}
-function createNewSession(): ChatSession {
-  return { id: generateId(), name: "New chat", messages: [], createdAt: Date.now() };
-}
 function formatTime(ts: number) {
   return new Date(ts).toLocaleTimeString("en-US", {
     hour: "2-digit", minute: "2-digit", hour12: true,
@@ -41,63 +31,83 @@ export default function Chat() {
   const [currentSessionId, setCurrentSessionId] = useState("");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
   const [showClearDialog, setShowClearDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState<string | null>(null);
   const [showSessions, setShowSessions] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showScrollDown, setShowScrollDown] = useState(false);
-  const [streamingText, setStreamingText] = useState("");
-  const [streamingFullText, setStreamingFullText] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const sendingRef = useRef(false);
-  const typingTimerRef = useRef<any>(null);
-  const [mounted, setMounted] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const saveTimerRef = useRef<any>(null);
 
+  // Load sessions from Supabase on mount
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(SESSIONS_KEY);
-      const savedId = localStorage.getItem(CURRENT_SESSION_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setSessions(parsed);
-          setCurrentSessionId(
-            savedId && parsed.find((s: ChatSession) => s.id === savedId) ? savedId : parsed[0].id
-          );
-          setMounted(true);
-          return;
-        }
-      }
-      const fresh = createNewSession();
-      setSessions([fresh]);
-      setCurrentSessionId(fresh.id);
-    } catch {}
-    setMounted(true);
+    loadSessions();
   }, []);
 
-  useEffect(() => {
-    if (mounted && sessions.length > 0) {
-      try {
-        localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-        localStorage.setItem(CURRENT_SESSION_KEY, currentSessionId);
-      } catch {}
+  async function loadSessions() {
+    try {
+      const res = await fetch("/api/chat-sessions");
+      const data = await res.json();
+      if (data.sessions && data.sessions.length > 0) {
+        setSessions(data.sessions);
+        setCurrentSessionId(data.sessions[0].id);
+      } else {
+        // Create first session
+        const createRes = await fetch("/api/chat-sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "create" }),
+        });
+        const createData = await createRes.json();
+        if (createData.session) {
+          setSessions([createData.session]);
+          setCurrentSessionId(createData.session.id);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load chat sessions:", err);
+    } finally {
+      setSessionsLoading(false);
     }
-  }, [sessions, currentSessionId, mounted]);
+  }
+
+  // Debounced save to Supabase
+  function saveToSupabase(sessionId: string, messages: Message[], name?: string) {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        await fetch("/api/chat-sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "update",
+            sessionId,
+            messages,
+            name,
+          }),
+        });
+      } catch (err) {
+        console.error("Failed to save chat:", err);
+      }
+    }, 500);
+  }
 
   const currentSession = sessions.find((s) => s.id === currentSessionId);
-  const messages = currentSession?.messages || [];
+  const messages: Message[] = (currentSession?.messages as Message[]) || [];
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, []);
 
-  useEffect(() => { scrollToBottom(); }, [messages.length, loading, streamingText, scrollToBottom]);
+  useEffect(() => { scrollToBottom(); }, [messages.length, loading, scrollToBottom]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -113,41 +123,36 @@ export default function Chat() {
   }
 
   function updateMessages(newMessages: Message[]) {
+    const newName = currentSession?.name === "New chat" && newMessages.length > 0
+      ? newMessages[0].content.substring(0, 35) + (newMessages[0].content.length > 35 ? "..." : "")
+      : undefined;
+
     setSessions((prev) =>
       prev.map((s) => {
         if (s.id !== currentSessionId) return s;
-        const name = s.name === "New chat" && newMessages.length > 0
-          ? newMessages[0].content.substring(0, 35) + (newMessages[0].content.length > 35 ? "..." : "")
-          : s.name;
-        return { ...s, messages: newMessages, name };
+        return { ...s, messages: newMessages, name: newName || s.name };
       })
     );
+
+    // Save to Supabase
+    saveToSupabase(currentSessionId, newMessages, newName);
   }
 
-  // Typewriter effect
-  function startTypewriter(fullText: string, onComplete: (text: string) => void) {
-    setIsTyping(true);
-    setStreamingFullText(fullText);
-    setStreamingText("");
-    let i = 0;
-    if (typingTimerRef.current) clearInterval(typingTimerRef.current);
-    typingTimerRef.current = setInterval(() => {
-      i += Math.floor(Math.random() * 3) + 2; // 2-4 chars at a time for natural speed
-      if (i >= fullText.length) {
-        setStreamingText(fullText);
-        setIsTyping(false);
-        clearInterval(typingTimerRef.current);
-        onComplete(fullText);
-      } else {
-        setStreamingText(fullText.substring(0, i));
+  async function startNewSession() {
+    try {
+      const res = await fetch("/api/chat-sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create" }),
+      });
+      const data = await res.json();
+      if (data.session) {
+        setSessions((prev) => [data.session, ...prev]);
+        setCurrentSessionId(data.session.id);
       }
-    }, TYPING_SPEED);
-  }
-
-  function startNewSession() {
-    const fresh = createNewSession();
-    setSessions((prev) => [fresh, ...prev]);
-    setCurrentSessionId(fresh.id);
+    } catch (err) {
+      console.error("Failed to create session:", err);
+    }
     setShowSessions(false);
     setInput("");
   }
@@ -157,11 +162,26 @@ export default function Chat() {
     setShowSessions(false);
   }
 
-  function deleteSession(id: string) {
+  async function deleteSession(id: string) {
+    try {
+      await fetch("/api/chat-sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", sessionId: id }),
+      });
+    } catch {}
+
     if (sessions.length <= 1) {
-      const fresh = createNewSession();
-      setSessions([fresh]);
-      setCurrentSessionId(fresh.id);
+      const res = await fetch("/api/chat-sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create" }),
+      });
+      const data = await res.json();
+      if (data.session) {
+        setSessions([data.session]);
+        setCurrentSessionId(data.session.id);
+      }
     } else {
       const filtered = sessions.filter((s) => s.id !== id);
       setSessions(filtered);
@@ -181,6 +201,14 @@ export default function Chat() {
       setCopiedId(`${currentSessionId}-${index}`);
       setTimeout(() => setCopiedId(null), 2000);
     } catch {}
+  }
+
+  function stopGeneration() {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setLoading(false);
   }
 
   function toggleListening() {
@@ -227,37 +255,38 @@ export default function Chat() {
     setLoading(true);
     setTimeout(() => { sendingRef.current = false; }, 500);
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       const res = await fetch("/api/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: newMessages.map((m) => ({ role: m.role, content: m.content })) }),
+        signal: controller.signal,
       });
       const data = await res.json();
-      const responseText = data.error
-        ? "I could not process that request right now. Please try again in a moment."
-        : data.message;
-
-      setLoading(false);
-
-      // Start typewriter effect
-      startTypewriter(responseText, (finalText) => {
-        updateMessages([...newMessages, {
-          role: "assistant",
-          content: finalText,
-          timestamp: Date.now(),
-        }]);
-        setStreamingText("");
-        setStreamingFullText("");
-      });
-    } catch {
-      setLoading(false);
-      updateMessages([...newMessages, {
-        role: "assistant",
-        content: "Could not reach the server. Please check your connection and try again.",
+      const finalMessages = [...newMessages, {
+        role: "assistant" as const,
+        content: data.error
+          ? "I could not process that request right now. Please try again in a moment."
+          : data.message,
         timestamp: Date.now(),
-      }]);
+      }];
+      updateMessages(finalMessages);
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        updateMessages([...newMessages, {
+          role: "assistant", content: "Response generation was stopped.", timestamp: Date.now(),
+        }]);
+      } else {
+        updateMessages([...newMessages, {
+          role: "assistant", content: "Could not reach the server. Please try again.", timestamp: Date.now(),
+        }]);
+      }
     } finally {
+      setLoading(false);
+      abortControllerRef.current = null;
       textareaRef.current?.focus();
     }
   }
@@ -266,15 +295,19 @@ export default function Chat() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   }
 
+  if (sessionsLoading) {
+    return (
+      <div className="flex items-center justify-center" style={{ height: "calc(100dvh - 3.5rem)" }}>
+        <Loader2 className="w-5 h-5 text-zinc-600 animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="flex flex-col" style={{ height: "calc(100dvh - 3.5rem)" }}>
-        {/* Session bar */}
         <div className="shrink-0 px-4 h-10 border-b border-zinc-800/50 flex items-center justify-between relative">
-          <button
-            onClick={() => setShowSessions(!showSessions)}
-            className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors min-w-0"
-          >
+          <button onClick={() => setShowSessions(!showSessions)} className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors min-w-0">
             <span className="truncate max-w-[200px]">{currentSession?.name || "New chat"}</span>
             <ChevronDown className={`w-3 h-3 shrink-0 transition-transform ${showSessions ? "rotate-180" : ""}`} />
           </button>
@@ -288,7 +321,7 @@ export default function Chat() {
                 {sessions.map((session) => (
                   <div key={session.id} className={`flex items-center gap-2 px-4 py-2.5 text-xs transition-colors ${session.id === currentSessionId ? "bg-zinc-800/50 text-zinc-200" : "text-zinc-500 hover:bg-zinc-900/50 hover:text-zinc-300"}`}>
                     <button onClick={() => switchSession(session.id)} className="flex-1 text-left truncate min-w-0">{session.name}</button>
-                    <span className="text-[10px] text-zinc-700 shrink-0">{session.messages.length}</span>
+                    <span className="text-[10px] text-zinc-700 shrink-0">{(session.messages as Message[]).length}</span>
                     <button onClick={(e) => { e.stopPropagation(); setShowDeleteDialog(session.id); setShowSessions(false); }} className="text-zinc-700 hover:text-red-400 transition-colors shrink-0 p-0.5">
                       <Trash2 className="w-3 h-3" />
                     </button>
@@ -299,10 +332,9 @@ export default function Chat() {
           )}
         </div>
 
-        {/* Messages */}
         <div ref={scrollContainerRef} onScroll={handleScroll} className="flex-1 overflow-y-auto p-4 md:p-6 relative">
           <div className="max-w-2xl mx-auto space-y-6">
-            {messages.length === 0 && !isTyping && (
+            {messages.length === 0 && (
               <div className="text-center py-10 md:py-14 space-y-4">
                 <div className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto">
                   <div className="w-4 h-4 rounded bg-amber-500/90" />
@@ -349,20 +381,6 @@ export default function Chat() {
               );
             })}
 
-            {/* Typewriter streaming message */}
-            {isTyping && streamingText && (
-              <div className="flex gap-3">
-                <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0 mt-0.5">
-                  <div className="w-3 h-3 rounded bg-amber-500/90" />
-                </div>
-                <div className="flex-1 min-w-0 pt-0.5">
-                  <p className="text-xs font-medium text-zinc-500 mb-1">Axon</p>
-                  <Markdown content={streamingText} />
-                  <span className="inline-block w-0.5 h-4 bg-amber-500/70 animate-pulse ml-0.5 align-text-bottom" />
-                </div>
-              </div>
-            )}
-
             {loading && (
               <div className="flex gap-3">
                 <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0 mt-0.5">
@@ -385,13 +403,17 @@ export default function Chat() {
           )}
         </div>
 
-        {/* Input */}
         <div className="shrink-0 px-4 pb-4 pt-2 border-t border-zinc-800/50 bg-zinc-950">
           <div className="max-w-2xl mx-auto">
             <div className="flex items-end gap-2">
-              {messages.length > 0 && (
+              {messages.length > 0 && !loading && (
                 <button onClick={() => setShowClearDialog(true)} className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-600 hover:text-red-400 hover:border-red-400/30 transition-colors mb-[2px]" title="Clear chat">
                   <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+              {loading && (
+                <button onClick={stopGeneration} className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl border border-red-400/30 bg-red-400/10 text-red-400 hover:bg-red-400/20 transition-colors mb-[2px]" title="Stop generating">
+                  <Square className="w-4 h-4" />
                 </button>
               )}
               <div className="flex-1 flex items-end gap-2 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 focus-within:border-zinc-700 transition-colors">
@@ -399,15 +421,15 @@ export default function Chat() {
                   ref={textareaRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
                   placeholder={isListening ? "Listening..." : "Ask Axon to do something..."}
                   className="flex-1 bg-transparent text-sm text-zinc-200 placeholder:text-zinc-600 outline-none resize-none py-1 leading-relaxed"
-                  disabled={loading || isTyping} rows={1} style={{ maxHeight: "150px" }}
+                  disabled={loading} rows={1} style={{ maxHeight: "150px" }}
                 />
                 <div className="flex items-center gap-1 shrink-0 pb-0.5">
-                  <button onClick={toggleListening} disabled={loading || isTyping}
+                  <button onClick={toggleListening} disabled={loading}
                     className={`p-1.5 rounded-lg transition-colors ${isListening ? "text-red-400 bg-red-400/10" : "text-zinc-600 hover:text-zinc-400"}`}
                     title={isListening ? "Stop listening" : "Voice input"}>
                     {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                   </button>
-                  <button onClick={handleSend} disabled={loading || isTyping || !input.trim()}
+                  <button onClick={handleSend} disabled={loading || !input.trim()}
                     className="text-xs font-medium bg-amber-500 text-zinc-950 px-3 py-1.5 rounded-lg hover:bg-amber-400 transition-colors disabled:opacity-30">
                     {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                   </button>
@@ -421,7 +443,6 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* Clear dialog */}
       {showClearDialog && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <button className="absolute inset-0 bg-black/60" onClick={() => setShowClearDialog(false)} />
@@ -436,7 +457,6 @@ export default function Chat() {
         </div>
       )}
 
-      {/* Delete session dialog */}
       {showDeleteDialog && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <button className="absolute inset-0 bg-black/60" onClick={() => setShowDeleteDialog(null)} />

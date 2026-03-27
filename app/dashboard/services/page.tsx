@@ -1,18 +1,10 @@
 "use client";
-
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import {
-  Mail,
-  Github,
-  MessageSquare,
-  Check,
-  Loader2,
-  ExternalLink,
-  Info,
-  XCircle,
-  AlertCircle,
-  CheckCircle,
+  Mail, Github, MessageSquare, Check, Loader2, ExternalLink,
+  Info, XCircle, AlertCircle, CheckCircle, Music, Send,
+  ListTodo, Users, Camera,
 } from "lucide-react";
 
 interface ServiceConfig {
@@ -28,19 +20,23 @@ interface ServiceConfig {
 
 const services: ServiceConfig[] = [
   {
-    id: "gmail",
+    id: "google",
     connectionKey: "google",
     connectionName: "google-oauth2",
-    name: "Gmail, Calendar & Drive",
+    name: "Google Services",
     description:
-      "Read, draft, and send emails. View and manage calendar events. Search Google Drive files.",
+      "Gmail, Calendar, Drive, Tasks, and Contacts. All through a single Google authorization.",
     icon: Mail,
     scopes: [
       "gmail.readonly",
       "gmail.send",
+      "gmail.modify",
       "calendar.events",
       "calendar.events.readonly",
       "drive.readonly",
+      "tasks",
+      "tasks.readonly",
+      "contacts.readonly",
     ],
     available: true,
   },
@@ -50,10 +46,50 @@ const services: ServiceConfig[] = [
     connectionName: "github",
     name: "GitHub",
     description:
-      "Access repositories, issues, pull requests, and notifications.",
+      "Repositories, issues, pull requests, notifications. Create issues and comments.",
     icon: Github,
     scopes: ["repo", "read:org", "read:user", "notifications"],
     available: true,
+  },
+  {
+    id: "spotify",
+    connectionKey: null,
+    connectionName: null,
+    name: "Spotify",
+    description: "Control playback, search music, manage playlists.",
+    icon: Music,
+    scopes: ["user-read-playback-state", "user-modify-playback-state", "playlist-read-private"],
+    available: false,
+  },
+  {
+    id: "telegram",
+    connectionKey: null,
+    connectionName: null,
+    name: "Telegram",
+    description: "Read and send messages through your Telegram bot.",
+    icon: Send,
+    scopes: ["bot:messages", "bot:send"],
+    available: false,
+  },
+  {
+    id: "x",
+    connectionKey: null,
+    connectionName: null,
+    name: "X (Twitter)",
+    description: "Read timeline, post tweets, read and send DMs.",
+    icon: MessageSquare,
+    scopes: ["tweet.read", "tweet.write", "dm.read"],
+    available: false,
+  },
+  {
+    id: "instagram",
+    connectionKey: null,
+    connectionName: null,
+    name: "Instagram",
+    description: "View posts, insights, and basic profile data.",
+    icon: Camera,
+    scopes: ["instagram_basic", "pages_read_engagement"],
+    available: false,
   },
   {
     id: "slack",
@@ -78,16 +114,14 @@ export default function ServicesPage() {
   useEffect(() => {
     const urlError = searchParams.get("error");
     const urlConnected = searchParams.get("connected");
-
     if (urlError) {
       setError(decodeURIComponent(urlError));
       window.history.replaceState({}, "", "/dashboard/services");
     }
     if (urlConnected) {
-      setSuccess(`${urlConnected} connected successfully.`);
+      setSuccess(`${urlConnected} connected successfully with updated permissions.`);
       window.history.replaceState({}, "", "/dashboard/services");
     }
-
     checkStatuses();
   }, [searchParams]);
 
@@ -95,9 +129,7 @@ export default function ServicesPage() {
     try {
       const res = await fetch("/api/connections/status");
       const data = await res.json();
-      if (data.statuses) {
-        setStatuses(data.statuses);
-      }
+      if (data.statuses) setStatuses(data.statuses);
     } catch (err) {
       console.error("Failed to check statuses:", err);
     } finally {
@@ -112,30 +144,20 @@ export default function ServicesPage() {
   }
 
   async function disconnectService(connectionKey: string) {
-    if (
-      !window.confirm(
-        "Disconnect this service? This will revoke all access."
-      )
-    ) {
-      return;
-    }
-
+    if (!window.confirm("Disconnect this service? You can reconnect to grant updated permissions.")) return;
     setDisconnecting(connectionKey);
     setError(null);
     setSuccess(null);
-
     try {
       const res = await fetch("/api/connections/disconnect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ connection: connectionKey }),
       });
-
       const data = await res.json();
-
       if (data.success) {
         setStatuses((prev) => ({ ...prev, [connectionKey]: false }));
-        setSuccess("Service disconnected.");
+        setSuccess("Service disconnected. Click Connect to grant updated permissions.");
       } else {
         setError(data.error || "Failed to disconnect service.");
       }
@@ -151,13 +173,12 @@ export default function ServicesPage() {
       <header className="h-14 px-4 md:px-6 flex items-center border-b border-zinc-800/50 shrink-0">
         <h1 className="text-sm font-medium text-zinc-200">Services</h1>
       </header>
-
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="max-w-2xl mx-auto space-y-6">
           <p className="text-sm text-zinc-400">
             Connect services to let Axon act on your behalf. Each connection
-            uses OAuth through Auth0 Token Vault. Tokens are stored securely and
-            never pass through this application.
+            uses OAuth through Auth0 Token Vault. To update permissions,
+            disconnect and reconnect the service.
           </p>
 
           {error && (
@@ -184,8 +205,7 @@ export default function ServicesPage() {
                 const isConnected = service.connectionKey
                   ? statuses[service.connectionKey] === true
                   : false;
-                const isDisconnecting =
-                  disconnecting === service.connectionKey;
+                const isDisconnecting = disconnecting === service.connectionKey;
 
                 return (
                   <div
@@ -207,9 +227,7 @@ export default function ServicesPage() {
                         >
                           <service.icon
                             className={`w-4 h-4 ${
-                              isConnected
-                                ? "text-emerald-400"
-                                : "text-zinc-400"
+                              isConnected ? "text-emerald-400" : "text-zinc-400"
                             }`}
                           />
                         </div>
@@ -239,7 +257,6 @@ export default function ServicesPage() {
                           </div>
                         </div>
                       </div>
-
                       <div className="shrink-0 flex items-center gap-2">
                         {service.available && !isConnected && (
                           <button
@@ -304,6 +321,10 @@ export default function ServicesPage() {
                 pass through the browser or get stored in this application.
               </li>
               <li>Token refresh is handled automatically by Token Vault.</li>
+              <li>
+                To update permissions for a service, disconnect and reconnect it.
+                The new consent screen will include all current scopes.
+              </li>
               <li>
                 You can disconnect any service individually to revoke its access
                 instantly.
