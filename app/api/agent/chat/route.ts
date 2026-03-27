@@ -4,6 +4,8 @@ import { getConnectionToken } from "@/lib/token-vault";
 import { listEmails, sendEmail, getEmailCount } from "@/lib/services/gmail";
 import { listEvents, createEvent } from "@/lib/services/calendar";
 import { listFiles, searchFiles } from "@/lib/services/drive";
+import { listTaskLists, listTasks, createTask, completeTask } from "@/lib/services/tasks";
+import { searchContacts, listConnections } from "@/lib/services/contacts";
 import {
   listRepos,
   listIssues,
@@ -29,13 +31,15 @@ const GITHUB_TOOL_NAMES = [
 function getServiceName(toolName: string): string {
   if (toolName.includes("calendar")) return "calendar";
   if (toolName.includes("drive")) return "drive";
+  if (toolName.includes("task")) return "tasks";
+  if (toolName.includes("contact")) return "contacts";
   if (GITHUB_TOOL_NAMES.includes(toolName)) return "github";
   return "gmail";
 }
 
 function getConnectionForTool(toolName: string): string {
   if (GITHUB_TOOL_NAMES.includes(toolName)) return "github";
-  return "google-oauth2";
+  return "google-oauth2"; // Gmail, Calendar, Drive, Tasks, Contacts all use Google
 }
 
 const TOOLS = [
@@ -46,6 +50,102 @@ const TOOLS = [
       description:
         "Get the number of total and unread emails in the user's inbox",
       parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+    {
+    type: "function" as const,
+    function: {
+      name: "search_emails",
+      description: "Search emails by query string (sender, subject, keywords)",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query (e.g. 'from:boss@company.com' or 'meeting agenda')" },
+          max_results: { type: "number", description: "Max results (default 5)" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "list_task_lists",
+      description: "List the user's Google Tasks lists",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "list_tasks",
+      description: "List tasks from the user's Google Tasks",
+      parameters: {
+        type: "object",
+        properties: {
+          task_list_id: { type: "string", description: "Task list ID (default: @default)" },
+          max_results: { type: "number", description: "Max results (default 20)" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "create_task",
+      description: "Create a new task in Google Tasks",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Task title" },
+          notes: { type: "string", description: "Task notes/description" },
+          due: { type: "string", description: "Due date in RFC 3339 format" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "complete_task",
+      description: "Mark a task as completed",
+      parameters: {
+        type: "object",
+        properties: {
+          task_id: { type: "string", description: "Task ID to complete" },
+        },
+        required: ["task_id"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "search_contacts",
+      description: "Search the user's Google Contacts by name or email",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Name or email to search for" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "list_contacts",
+      description: "List the user's recent Google Contacts",
+      parameters: {
+        type: "object",
+        properties: {
+          max_results: { type: "number", description: "Max results (default 20)" },
+        },
+        required: [],
+      },
     },
   },
   {
@@ -418,52 +518,64 @@ function buildSystemPrompt(
   mode: string,
   tone: string
 ): string {
-  let prompt = `You are Axon, an AI agent that helps users manage their email, calendar, files, and GitHub repositories. You have access to the user's Gmail, Google Calendar, Google Drive, and GitHub through Auth0 Token Vault.
+  let prompt = `You are Axon, an autonomous AI agent that manages a user's entire digital life. You have access to Gmail, Google Calendar, Google Drive, GitHub, Google Tasks, and Google Contacts through Auth0 Token Vault.
 
 Operating Mode: ${mode?.toUpperCase() || "ASSIST"}
 ${
   mode === "shadow"
-    ? "IMPORTANT: You are in SHADOW mode. You may ONLY observe and summarize. Do NOT draft, send, create, or modify anything. If the user asks you to take action, explain that Shadow mode only allows observation."
+    ? "SHADOW MODE: Observe and summarize only. Never modify anything."
     : mode === "autopilot"
-    ? "You are in AUTOPILOT mode. You may execute observe and draft actions freely. For act-tier actions (send, create), proceed if the action seems routine and safe. For anything destructive or unusual, still ask for confirmation."
-    : "You are in ASSIST mode. You may observe freely. For any action that modifies external resources (sending emails, creating events, creating issues), ALWAYS draft first and ask for explicit approval before executing."
+    ? `AUTOPILOT MODE: You have maximum autonomy. Execute routine actions automatically without asking.
+- Read, categorize, and respond to routine emails automatically
+- Create calendar events from email invitations
+- Create tasks from action items in emails
+- Approve and merge simple dependency update PRs
+- Archive processed emails
+- Only pause for: sending emails to new recipients, financial actions, destructive operations, or anything blocked by constitution rules
+- Chain multiple operations together efficiently
+- After completing an action, suggest or execute logical follow-up actions`
+    : `ASSIST MODE: You can observe freely. For modifications, draft first and ask for approval. Be proactive about suggesting actions.`
 }
 
-Core Rules:
-1. When the user asks about their emails, use the email tools to get real data.
-2. When the user asks about their schedule, use the calendar tools.
-3. When the user asks about their files or documents, use the drive tools.
-4. When the user asks about their GitHub repos, issues, PRs, or notifications, use the GitHub tools.
-5. For sending emails: ALWAYS use draft_email first and present the draft to the user. NEVER use send_email unless the user explicitly says "send it", "yes send", "approve", or similar confirmation.
-6. For calendar events: show event details and confirm before creating.
-7. For GitHub issues: show issue details and confirm before creating.
-8. Be concise and direct.
-9. When showing emails, format them clearly with sender, subject, and a brief snippet.
-10. When showing calendar events, format them with time, title, and location.
-11. When showing drive files, format them with name, type, and last modified date.
-12. When showing GitHub repos, format them with name, language, stars, and last updated.
-13. When showing GitHub issues or PRs, format them with number, title, state, and author.
-14. If a tool call fails, explain what happened honestly.
-15. Do not make up data. Only report what the tools return.
-16. Current date and time: ${new Date().toISOString()}`;
+Core Capabilities:
+1. EMAIL: Read, search, draft, send, archive emails. Search by sender, subject, or content.
+2. CALENDAR: Read, create, modify events. Check for conflicts automatically.
+3. DRIVE: List, search files. Access document metadata.
+4. GITHUB: Repos, issues, PRs, notifications. Create issues, comment on PRs.
+5. TASKS: List, create, complete tasks. Organize with task lists.
+6. CONTACTS: Search and list contacts. Look up email addresses and phone numbers.
+
+Behavioral Rules:
+- When asked about emails, proactively summarize the important ones and suggest actions
+- When creating calendar events, automatically check for conflicts first
+- When asked to email someone, search contacts first to find the right email address
+- When discussing GitHub PRs, offer to create related tasks or calendar events
+- Chain operations: if someone asks to "handle" something, do everything needed (read, draft, create tasks, schedule follow-ups)
+- Be concise but thorough. Use markdown formatting for clarity.
+- When showing lists, use bullet points or tables
+- Always show what actions you took and what you recommend next
+- If a tool call fails, explain honestly and suggest alternatives
+- Current date and time: ${new Date().toISOString()}
+
+Cross-Service Intelligence:
+- If an email mentions a meeting, check the calendar
+- If a PR needs review, check if there's time on the calendar
+- If creating a task from an email, link back to the email context
+- Proactively surface connections between services`;
 
   if (rules.length > 0) {
-    prompt += `\n\nUser Constitution (MUST be obeyed - these rules override all other behavior):`;
+    prompt += `\n\nUser Constitution (MUST be obeyed - overrides all other behavior):`;
     rules.forEach((rule, i) => {
       prompt += `\n${i + 1}. ${rule.rule_text}`;
     });
-    prompt += `\n\nIf any action would violate the user's constitution, refuse to do it and explain which rule prevents it.`;
+    prompt += `\nIf any action would violate the constitution, refuse and explain which rule prevents it.`;
   }
 
   const toneInstructions: Record<string, string> = {
-    professional:
-      "Use a professional, clear, and courteous tone in all communications.",
-    casual:
-      "Use a friendly, casual, and approachable tone. Keep it natural.",
-    direct:
-      "Be brief and to the point. No filler. Just facts and actions.",
+    professional: "Communicate in a professional, clear, and courteous manner.",
+    casual: "Be friendly, casual, and approachable. Keep it natural.",
+    direct: "Be brief and direct. No filler. Just facts and actions.",
   };
-
   if (tone && toneInstructions[tone]) {
     prompt += `\n\nCommunication Style: ${toneInstructions[tone]}`;
   }
@@ -574,6 +686,66 @@ async function executeTool(
           unread: e.isUnread,
         }));
         result = JSON.stringify(simplified);
+        break;
+      }
+            case "search_emails": {
+        const token = await getConnectionToken("google-oauth2");
+        const q = args.query || "";
+        const max = Math.min(args.max_results || 5, 10);
+        const res = await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(q)}&maxResults=${max}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const data = await res.json();
+        if (!data.messages) { result = JSON.stringify([]); break; }
+        const emails = [];
+        for (const msg of data.messages.slice(0, max)) {
+          const detail = await fetch(
+            `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          const m = await detail.json();
+          const headers = m.payload?.headers || [];
+          const getH = (n: string) => headers.find((h: any) => h.name === n)?.value || "";
+          emails.push({ from: getH("From"), subject: getH("Subject"), date: getH("Date"), snippet: m.snippet?.substring(0, 100) });
+        }
+        result = JSON.stringify(emails);
+        break;
+      }
+      case "list_task_lists": {
+        const token = await getConnectionToken("google-oauth2");
+        const lists = await listTaskLists(token);
+        result = JSON.stringify(lists);
+        break;
+      }
+      case "list_tasks": {
+        const token = await getConnectionToken("google-oauth2");
+        const tasks = await listTasks(token, args.task_list_id || "@default", args.max_results || 20);
+        result = JSON.stringify(tasks);
+        break;
+      }
+      case "create_task": {
+        const token = await getConnectionToken("google-oauth2");
+        const task = await createTask(token, args.title, args.notes, args.due);
+        result = JSON.stringify({ ...task, status: "created" });
+        break;
+      }
+      case "complete_task": {
+        const token = await getConnectionToken("google-oauth2");
+        await completeTask(token, args.task_id);
+        result = JSON.stringify({ status: "completed", task_id: args.task_id });
+        break;
+      }
+      case "search_contacts": {
+        const token = await getConnectionToken("google-oauth2");
+        const contacts = await searchContacts(token, args.query);
+        result = JSON.stringify(contacts);
+        break;
+      }
+      case "list_contacts": {
+        const token = await getConnectionToken("google-oauth2");
+        const contacts = await listConnections(token, args.max_results || 20);
+        result = JSON.stringify(contacts);
         break;
       }
       case "draft_email": {

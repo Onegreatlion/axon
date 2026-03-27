@@ -9,75 +9,35 @@ interface ClassificationResult {
 }
 
 const TIER_RULES: Record<string, { tier: RiskTier; scopes: string[] }> = {
-  get_email_count: {
-    tier: "observe",
-    scopes: ["gmail.readonly"],
-  },
-  list_emails: {
-    tier: "observe",
-    scopes: ["gmail.readonly"],
-  },
-  list_calendar_events: {
-    tier: "observe",
-    scopes: ["calendar.events.readonly"],
-  },
-  list_drive_files: {
-    tier: "observe",
-    scopes: ["drive.readonly"],
-  },
-  search_drive_files: {
-    tier: "observe",
-    scopes: ["drive.readonly"],
-  },
-  list_repos: {
-    tier: "observe",
-    scopes: ["repo"],
-  },
-  list_issues: {
-    tier: "observe",
-    scopes: ["repo"],
-  },
-  list_pull_requests: {
-    tier: "observe",
-    scopes: ["repo"],
-  },
-  get_notifications: {
-    tier: "observe",
-    scopes: ["notifications"],
-  },
-  draft_email: {
-    tier: "draft",
-    scopes: ["gmail.send"],
-  },
-  send_email: {
-    tier: "act",
-    scopes: ["gmail.send"],
-  },
-  create_calendar_event: {
-    tier: "act",
-    scopes: ["calendar.events"],
-  },
-  create_issue: {
-    tier: "act",
-    scopes: ["repo"],
-  },
-  add_comment: {
-    tier: "act",
-    scopes: ["repo"],
-  },
-  delete_email: {
-    tier: "transact",
-    scopes: ["gmail.modify"],
-  },
-  delete_calendar_event: {
-    tier: "transact",
-    scopes: ["calendar.events"],
-  },
+  get_email_count: { tier: "observe", scopes: ["gmail.readonly"] },
+  list_emails: { tier: "observe", scopes: ["gmail.readonly"] },
+  search_emails: { tier: "observe", scopes: ["gmail.readonly"] },
+  list_calendar_events: { tier: "observe", scopes: ["calendar.events.readonly"] },
+  list_drive_files: { tier: "observe", scopes: ["drive.readonly"] },
+  search_drive_files: { tier: "observe", scopes: ["drive.readonly"] },
+  list_repos: { tier: "observe", scopes: ["repo"] },
+  list_issues: { tier: "observe", scopes: ["repo"] },
+  list_pull_requests: { tier: "observe", scopes: ["repo"] },
+  get_notifications: { tier: "observe", scopes: ["notifications"] },
+  list_task_lists: { tier: "observe", scopes: ["tasks.readonly"] },
+  list_tasks: { tier: "observe", scopes: ["tasks.readonly"] },
+  search_contacts: { tier: "observe", scopes: ["contacts.readonly"] },
+  list_contacts: { tier: "observe", scopes: ["contacts.readonly"] },
+  draft_email: { tier: "draft", scopes: ["gmail.send"] },
+  send_email: { tier: "act", scopes: ["gmail.send"] },
+  archive_email: { tier: "act", scopes: ["gmail.modify"] },
+  mark_as_read: { tier: "act", scopes: ["gmail.modify"] },
+  create_calendar_event: { tier: "act", scopes: ["calendar.events"] },
+  create_issue: { tier: "act", scopes: ["repo"] },
+  add_comment: { tier: "act", scopes: ["repo"] },
+  create_task: { tier: "act", scopes: ["tasks"] },
+  complete_task: { tier: "act", scopes: ["tasks"] },
+  delete_email: { tier: "transact", scopes: ["gmail.modify"] },
+  delete_calendar_event: { tier: "transact", scopes: ["calendar.events"] },
 };
 
 export function classifyIntent(toolName: string): ClassificationResult {
   const rule = TIER_RULES[toolName];
-
   if (!rule) {
     return {
       tier: "admin",
@@ -87,14 +47,10 @@ export function classifyIntent(toolName: string): ClassificationResult {
       scopes: [],
     };
   }
-
   const requiresApproval =
-    rule.tier === "act" ||
-    rule.tier === "transact" ||
-    rule.tier === "admin";
+    rule.tier === "act" || rule.tier === "transact" || rule.tier === "admin";
   const requiresStepUp =
     rule.tier === "transact" || rule.tier === "admin";
-
   const reasoningMap: Record<RiskTier, string> = {
     observe: "Read-only access. No data is modified. Auto-approved.",
     draft: "Content created but not sent or published. Auto-approved.",
@@ -102,7 +58,6 @@ export function classifyIntent(toolName: string): ClassificationResult {
     transact: "Irreversible or destructive action. Always requires approval.",
     admin: "Permission or configuration change. Always requires manual confirmation.",
   };
-
   return {
     tier: rule.tier,
     reasoning: reasoningMap[rule.tier],

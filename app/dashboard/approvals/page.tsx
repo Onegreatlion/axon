@@ -25,13 +25,6 @@ const tierColors: Record<string, string> = {
   admin: "text-red-400 bg-red-400/10 border-red-400/20",
 };
 
-const statusStyles: Record<string, string> = {
-  pending: "text-amber-400",
-  approved: "text-emerald-400",
-  rejected: "text-red-400",
-  expired: "text-zinc-500",
-};
-
 export default function ApprovalsPage() {
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,9 +38,7 @@ export default function ApprovalsPage() {
     try {
       const res = await fetch("/api/approvals");
       const data = await res.json();
-      if (data.approvals) {
-        setApprovals(data.approvals);
-      }
+      if (data.approvals) setApprovals(data.approvals);
     } catch (err) {
       console.error("Failed to fetch approvals:", err);
     } finally {
@@ -63,7 +54,6 @@ export default function ApprovalsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, action }),
       });
-
       if (res.ok) {
         setApprovals((prev) =>
           prev.map((a) =>
@@ -86,7 +76,7 @@ export default function ApprovalsPage() {
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-      hour12: false,
+      hour12: true,
     });
   }
 
@@ -97,8 +87,12 @@ export default function ApprovalsPage() {
         return `Send email to ${args.to || "unknown"}: "${args.subject || ""}"`;
       case "create_calendar_event":
         return `Create event: "${args.summary || ""}"`;
+      case "create_issue":
+        return `Create issue in ${args.repo || "unknown"}: "${args.title || ""}"`;
+      case "add_comment":
+        return `Comment on ${args.repo || "unknown"} #${args.issue_number || "?"}`;
       default:
-        return `${approval.action_type}`;
+        return approval.action_type;
     }
   }
 
@@ -136,98 +130,96 @@ export default function ApprovalsPage() {
               {pending.length > 0 && (
                 <div className="space-y-3">
                   <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
-                    Pending
+                    Pending ({pending.length})
                   </p>
                   {pending.map((approval) => (
                     <div
                       key={approval.id}
-                      className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4"
+                      className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4 space-y-3"
                     >
-                      <div className="flex flex-col gap-3">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Clock className="w-3.5 h-3.5 text-amber-400" />
-                          <span className="text-[10px] font-medium text-zinc-400 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5">
-                            {approval.service}
-                          </span>
-                          <span
-                            className={`text-[10px] font-mono font-medium px-1.5 py-0.5 rounded border ${
-                              tierColors[approval.risk_tier] || "text-zinc-400"
-                            }`}
-                          >
-                            {approval.risk_tier}
-                          </span>
-                          <span className="text-[10px] text-zinc-600">
-                            {formatTime(approval.created_at)}
-                          </span>
-                        </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span className="text-[10px] font-medium text-zinc-400 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5">
+                          {approval.service}
+                        </span>
+                        <span
+                          className={`text-[10px] font-mono font-medium px-1.5 py-0.5 rounded border ${
+                            tierColors[approval.risk_tier] || "text-zinc-400"
+                          }`}
+                        >
+                          {approval.risk_tier}
+                        </span>
+                        <span className="text-[10px] text-zinc-600 ml-auto">
+                          {formatTime(approval.created_at)}
+                        </span>
+                      </div>
 
-                        <p className="text-sm text-zinc-200">
-                          {describeAction(approval)}
+                      <p className="text-sm text-zinc-200">
+                        {describeAction(approval)}
+                      </p>
+
+                      {approval.reasoning && (
+                        <p className="text-xs text-zinc-500">
+                          {approval.reasoning}
                         </p>
+                      )}
 
-                        {approval.reasoning && (
-                          <p className="text-xs text-zinc-500">
-                            {approval.reasoning}
+                      {approval.constitution_rules_applied?.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-medium text-zinc-500">
+                            Triggered by:
                           </p>
-                        )}
-
-                        {approval.constitution_rules_applied?.length > 0 && (
-                          <div className="space-y-1">
-                            <p className="text-[10px] font-medium text-zinc-500">
-                              Constitution rules applied:
-                            </p>
-                            {approval.constitution_rules_applied.map(
-                              (rule, i) => (
-                                <p
-                                  key={i}
-                                  className="text-[10px] text-amber-400/80 bg-amber-400/5 border border-amber-400/10 rounded px-2 py-1"
-                                >
-                                  {rule}
-                                </p>
-                              )
-                            )}
-                          </div>
-                        )}
-
-                        {approval.scopes_required?.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
-                            {approval.scopes_required.map((scope) => (
-                              <span
-                                key={scope}
-                                className="text-[10px] font-mono text-zinc-600 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5"
+                          {approval.constitution_rules_applied.map(
+                            (rule, i) => (
+                              <p
+                                key={i}
+                                className="text-[10px] text-amber-400/80 bg-amber-400/5 border border-amber-400/10 rounded px-2 py-1"
                               >
-                                {scope}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="flex gap-2 pt-1">
-                          <button
-                            onClick={() =>
-                              handleAction(approval.id, "approved")
-                            }
-                            disabled={acting === approval.id}
-                            className="flex-1 sm:flex-none text-xs font-medium text-zinc-950 bg-emerald-500 rounded-lg px-4 py-2 hover:bg-emerald-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
-                          >
-                            {acting === approval.id ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <Check className="w-3 h-3" />
-                            )}
-                            Approve
-                          </button>
-                          <button
-                            onClick={() =>
-                              handleAction(approval.id, "rejected")
-                            }
-                            disabled={acting === approval.id}
-                            className="flex-1 sm:flex-none text-xs font-medium text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2 hover:bg-red-400/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
-                          >
-                            <X className="w-3 h-3" />
-                            Reject
-                          </button>
+                                {rule}
+                              </p>
+                            )
+                          )}
                         </div>
+                      )}
+
+                      {approval.scopes_required?.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {approval.scopes_required.map((scope) => (
+                            <span
+                              key={scope}
+                              className="text-[10px] font-mono text-zinc-600 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5"
+                            >
+                              {scope}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          onClick={() =>
+                            handleAction(approval.id, "approved")
+                          }
+                          disabled={acting === approval.id}
+                          className="flex-1 sm:flex-none text-xs font-medium text-zinc-950 bg-emerald-500 rounded-lg px-4 py-2 hover:bg-emerald-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                        >
+                          {acting === approval.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Check className="w-3 h-3" />
+                          )}
+                          Approve
+                        </button>
+                        <button
+                          onClick={() =>
+                            handleAction(approval.id, "rejected")
+                          }
+                          disabled={acting === approval.id}
+                          className="flex-1 sm:flex-none text-xs font-medium text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-4 py-2 hover:bg-red-400/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                        >
+                          <X className="w-3 h-3" />
+                          Reject
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -237,44 +229,42 @@ export default function ApprovalsPage() {
               {resolved.length > 0 && (
                 <div className="space-y-3">
                   <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
-                    Resolved
+                    Resolved ({resolved.length})
                   </p>
                   {resolved.map((approval) => (
                     <div
                       key={approval.id}
-                      className="rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-4"
+                      className="rounded-xl border border-zinc-800/50 bg-zinc-900/30 p-4 space-y-2"
                     >
-                      <div className="flex flex-col gap-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span
-                            className={`text-[10px] font-medium ${
-                              statusStyles[approval.status] || "text-zinc-500"
-                            }`}
-                          >
-                            {approval.status}
-                          </span>
-                          <span className="text-[10px] font-medium text-zinc-400 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5">
-                            {approval.service}
-                          </span>
-                          <span
-                            className={`text-[10px] font-mono font-medium px-1.5 py-0.5 rounded border ${
-                              tierColors[approval.risk_tier] || "text-zinc-400"
-                            }`}
-                          >
-                            {approval.risk_tier}
-                          </span>
-                        </div>
-
-                        <p className="text-xs text-zinc-400">
-                          {describeAction(approval)}
-                        </p>
-
-                        <p className="text-[10px] text-zinc-600">
-                          {formatTime(approval.created_at)}
-                          {approval.resolved_at &&
-                            ` / resolved ${formatTime(approval.resolved_at)}`}
-                        </p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`text-[10px] font-medium ${
+                            approval.status === "approved"
+                              ? "text-emerald-400"
+                              : "text-red-400"
+                          }`}
+                        >
+                          {approval.status}
+                        </span>
+                        <span className="text-[10px] font-medium text-zinc-400 bg-zinc-800/50 border border-zinc-800 rounded px-1.5 py-0.5">
+                          {approval.service}
+                        </span>
+                        <span
+                          className={`text-[10px] font-mono font-medium px-1.5 py-0.5 rounded border ${
+                            tierColors[approval.risk_tier] || "text-zinc-400"
+                          }`}
+                        >
+                          {approval.risk_tier}
+                        </span>
                       </div>
+                      <p className="text-xs text-zinc-400">
+                        {describeAction(approval)}
+                      </p>
+                      <p className="text-[10px] text-zinc-600">
+                        {formatTime(approval.created_at)}
+                        {approval.resolved_at &&
+                          ` — resolved ${formatTime(approval.resolved_at)}`}
+                      </p>
                     </div>
                   ))}
                 </div>
