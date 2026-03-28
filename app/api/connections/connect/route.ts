@@ -33,7 +33,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Step 1: Exchange refresh token for My Account API access token
     const tokenRes = await fetch(`https://${DOMAIN}/oauth/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -60,11 +59,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Step 2: Generate state for CSRF protection
     const state = crypto.randomBytes(16).toString("hex");
     const redirectUri = `${APP_BASE_URL}/api/connections/callback`;
 
-    // Step 3: Determine scopes for the external provider
     let scopes: string[] | undefined;
     if (connection === "github") {
       scopes = ["repo", "read:org", "read:user", "notifications"];
@@ -76,16 +73,19 @@ export async function GET(request: NextRequest) {
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/gmail.send",
         "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/gmail.settings.basic",
+        "https://www.googleapis.com/auth/gmail.labels",
+        "https://www.googleapis.com/auth/calendar",
         "https://www.googleapis.com/auth/calendar.events",
         "https://www.googleapis.com/auth/calendar.events.readonly",
         "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/drive.file",
         "https://www.googleapis.com/auth/tasks",
         "https://www.googleapis.com/auth/tasks.readonly",
         "https://www.googleapis.com/auth/contacts.readonly",
       ];
     }
 
-    // Step 4: Initiate Connected Accounts flow via My Account API
     const connectBody: any = {
       connection,
       redirect_uri: redirectUri,
@@ -123,7 +123,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Step 5: Store auth_session in cookie and redirect user to authorization
     const connectUrl = `${connectData.connect_uri}?ticket=${connectData.connect_params.ticket}`;
 
     const response = NextResponse.redirect(connectUrl);

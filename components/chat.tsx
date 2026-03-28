@@ -211,21 +211,23 @@ export default function Chat() {
     setLoading(false);
   }
 
-  function toggleListening() {
+    function toggleListening() {
     if (isListening) { stopListening(); return; }
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) { alert("Speech recognition not supported in this browser."); return; }
     sendingRef.current = false;
     const recognition = new SR();
-    recognition.continuous = true;
-    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognition.interimResults = false;
     recognition.lang = "en-US";
     recognition.onstart = () => setIsListening(true);
     recognition.onresult = (event: any) => {
       if (sendingRef.current) return;
-      let t = "";
-      for (let i = 0; i < event.results.length; i++) t += event.results[i][0].transcript;
-      setInput(t);
+      const transcript = event.results[0][0].transcript;
+      setInput((prev) => {
+        const trimmed = prev.trim();
+        return trimmed ? trimmed + " " + transcript : transcript;
+      });
     };
     recognition.onerror = () => setIsListening(false);
     recognition.onend = () => setIsListening(false);

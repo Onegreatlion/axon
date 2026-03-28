@@ -29,9 +29,14 @@ interface LLMResponse {
   }[];
 }
 
+async function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function callGemini(
   messages: ChatMessage[],
-  tools: ToolDef[]
+  tools: ToolDef[],
+  retryCount: number = 0
 ): Promise<LLMResponse> {
   const { GoogleGenerativeAI } = await import("@google/generative-ai");
   const genAI = new GoogleGenerativeAI(GOOGLE_AI_KEY!);
@@ -53,7 +58,7 @@ async function callGemini(
       : undefined;
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
+    model: "gemini-2.5-flash-preview-05-20",
     systemInstruction: systemMsg?.content || undefined,
     tools: geminiTools,
   });
@@ -97,7 +102,6 @@ async function callGemini(
       } catch {
         response = { result: msg.content };
       }
-
       const toolCall = messages.find(
         (m) =>
           m.role === "assistant" &&
@@ -106,7 +110,6 @@ async function callGemini(
       const funcName =
         toolCall?.tool_calls?.find((tc: any) => tc.id === msg.tool_call_id)
           ?.function?.name || "unknown";
-
       pendingParts.push({
         functionResponse: { name: funcName, response },
       });
@@ -122,40 +125,49 @@ async function callGemini(
     geminiHistory.push({ role: "user", parts: [{ text: "Continue." }] });
   }
 
-  const chat = model.startChat({ history: geminiHistory.slice(0, -1) });
-  const lastParts = geminiHistory[geminiHistory.length - 1]?.parts || [
-    { text: "Continue." },
-  ];
+  try {
+    const chat = model.startChat({ history: geminiHistory.slice(0, -1) });
+    const lastParts = geminiHistory[geminiHistory.length - 1]?.parts || [
+      { text: "Continue." },
+    ];
+    const result = await chat.sendMessage(lastParts);
+    const resp = result.response;
+    const candidates = resp.candidates || [];
+    const parts = candidates[0]?.content?.parts || [];
+    const textParts = parts.filter((p: any) => p.text).map((p: any) => p.text);
+    const funcCalls = parts.filter((p: any) => p.functionCall);
 
-  const result = await chat.sendMessage(lastParts);
-  const resp = result.response;
-  const candidates = resp.candidates || [];
-  const parts = candidates[0]?.content?.parts || [];
+    const toolCalls = funcCalls.map((fc: any, i: number) => ({
+      id: `call_${Date.now()}_${i}`,
+      type: "function" as const,
+      function: {
+        name: fc.functionCall.name,
+        arguments: JSON.stringify(fc.functionCall.args || {}),
+      },
+    }));
 
-  const textParts = parts.filter((p: any) => p.text).map((p: any) => p.text);
-  const funcCalls = parts.filter((p: any) => p.functionCall);
-
-  const toolCalls = funcCalls.map((fc: any, i: number) => ({
-    id: `call_${Date.now()}_${i}`,
-    type: "function" as const,
-    function: {
-      name: fc.functionCall.name,
-      arguments: JSON.stringify(fc.functionCall.args || {}),
-    },
-  }));
-
-  return {
-    content: textParts.join("\n") || null,
-    tool_calls: toolCalls,
-  };
+    return {
+      content: textParts.join("\n") || null,
+      tool_calls: toolCalls,
+    };
+  } catch (error: any) {
+    // Retry on rate limit with exponential backoff
+    if (error.message?.includes("429") && retryCount < 3) {
+      const waitTime = Math.pow(2, retryCount) * 2000; // 2s, 4s, 8s
+      console.log(`Gemini rate limited, retrying in ${waitTime}ms...`);
+      await sleep(waitTime);
+      return callGemini(messages, tools, retryCount + 1);
+    }
+    throw error;
+  }
 }
 
 const OPENROUTER_MODELS = [
   "nousresearch/hermes-3-llama-3.1-405b:free",
   "meta-llama/llama-3.3-70b-instruct:free",
   "mistralai/mistral-small-3.1-24b-instruct:free",
-  "openai/gpt-oss-120b:free",
   "nvidia/nemotron-3-super-120b-a12b:free",
+  "openai/gpt-oss-120b:free",
 ];
 
 async function callOpenRouter(
@@ -170,9 +182,8 @@ async function callOpenRouter(
         model,
         messages,
         temperature: 0.3,
-        max_tokens: 1024,
+        max_tokens: 2048,
       };
-
       if (tools.length > 0) {
         body.tools = tools;
         body.tool_choice = "auto";
@@ -199,14 +210,12 @@ async function callOpenRouter(
 
       const data = await res.json();
       const msg = data.choices?.[0]?.message;
-
       if (!msg) {
         lastError = `${model}: no message in response`;
         continue;
       }
 
       console.log(`OpenRouter: using ${model}`);
-
       return {
         content: msg.content || null,
         tool_calls: (msg.tool_calls || []).map((tc: any) => ({
@@ -240,7 +249,7 @@ async function callGroq(
     tools: tools.length > 0 ? (tools as any) : undefined,
     tool_choice: tools.length > 0 ? "auto" : undefined,
     temperature: 0.3,
-    max_tokens: 1024,
+    max_tokens: 2048,
   });
 
   const msg = response.choices[0].message;
@@ -261,6 +270,7 @@ export async function chatCompletion(
   messages: ChatMessage[],
   tools: ToolDef[]
 ): Promise<LLMResponse> {
+  // Try Gemini first (highest free tier)
   if (GOOGLE_AI_KEY) {
     try {
       return await callGemini(messages, tools);
@@ -269,6 +279,7 @@ export async function chatCompletion(
     }
   }
 
+  // Try OpenRouter second (multiple free models)
   if (OPENROUTER_KEY) {
     try {
       return await callOpenRouter(messages, tools);
@@ -277,6 +288,7 @@ export async function chatCompletion(
     }
   }
 
+  // Try Groq last
   if (GROQ_KEY) {
     try {
       return await callGroq(messages, tools);
