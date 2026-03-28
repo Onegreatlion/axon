@@ -19,14 +19,13 @@ const TIER_RULES: Record<string, { tier: RiskTier; scopes: string[] }> = {
   list_issues: { tier: "observe", scopes: ["repo"] },
   list_pull_requests: { tier: "observe", scopes: ["repo"] },
   get_notifications: { tier: "observe", scopes: ["notifications"] },
-  list_task_lists: { tier: "observe", scopes: ["tasks.readonly"] },
   list_tasks: { tier: "observe", scopes: ["tasks.readonly"] },
   search_contacts: { tier: "observe", scopes: ["contacts.readonly"] },
-  list_contacts: { tier: "observe", scopes: ["contacts.readonly"] },
+  daily_briefing: { tier: "observe", scopes: ["gmail.readonly", "calendar.events.readonly", "tasks.readonly"] },
   draft_email: { tier: "draft", scopes: ["gmail.send"] },
   send_email: { tier: "act", scopes: ["gmail.send"] },
-  archive_email: { tier: "act", scopes: ["gmail.modify"] },
-  mark_as_read: { tier: "act", scopes: ["gmail.modify"] },
+  archive_emails: { tier: "act", scopes: ["gmail.modify"] },
+  mark_emails_read: { tier: "act", scopes: ["gmail.modify"] },
   create_calendar_event: { tier: "act", scopes: ["calendar.events"] },
   create_issue: { tier: "act", scopes: ["repo"] },
   add_comment: { tier: "act", scopes: ["repo"] },
@@ -39,30 +38,18 @@ const TIER_RULES: Record<string, { tier: RiskTier; scopes: string[] }> = {
 export function classifyIntent(toolName: string): ClassificationResult {
   const rule = TIER_RULES[toolName];
   if (!rule) {
-    return {
-      tier: "admin",
-      reasoning: "Unknown action type. Requires manual review.",
-      requiresApproval: true,
-      requiresStepUp: true,
-      scopes: [],
-    };
+    return { tier: "admin", reasoning: "Unknown action. Manual review required.",
+      requiresApproval: true, requiresStepUp: true, scopes: [] };
   }
-  const requiresApproval =
-    rule.tier === "act" || rule.tier === "transact" || rule.tier === "admin";
-  const requiresStepUp =
-    rule.tier === "transact" || rule.tier === "admin";
+  const requiresApproval = rule.tier === "act" || rule.tier === "transact" || rule.tier === "admin";
+  const requiresStepUp = rule.tier === "transact" || rule.tier === "admin";
   const reasoningMap: Record<RiskTier, string> = {
-    observe: "Read-only access. No data is modified. Auto-approved.",
-    draft: "Content created but not sent or published. Auto-approved.",
-    act: "This action modifies external resources. Requires approval in assist mode.",
-    transact: "Irreversible or destructive action. Always requires approval.",
-    admin: "Permission or configuration change. Always requires manual confirmation.",
+    observe: "Read-only. Auto-approved.",
+    draft: "Content created, not published. Auto-approved.",
+    act: "Modifies external resources. Requires approval in assist mode.",
+    transact: "Irreversible action. Always requires approval.",
+    admin: "Configuration change. Manual confirmation required.",
   };
-  return {
-    tier: rule.tier,
-    reasoning: reasoningMap[rule.tier],
-    requiresApproval,
-    requiresStepUp,
-    scopes: rule.scopes,
-  };
+  return { tier: rule.tier, reasoning: reasoningMap[rule.tier],
+    requiresApproval, requiresStepUp, scopes: rule.scopes };
 }
