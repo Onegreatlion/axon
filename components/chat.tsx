@@ -211,7 +211,7 @@ export default function Chat() {
     setLoading(false);
   }
 
-    function toggleListening() {
+        function toggleListening() {
     if (isListening) { stopListening(); return; }
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) { alert("Speech recognition not supported in this browser."); return; }
@@ -244,7 +244,6 @@ export default function Chat() {
     }
     setIsListening(false);
   }
-
   async function handleSend() {
     const text = input.trim();
     if (!text || loading) return;
