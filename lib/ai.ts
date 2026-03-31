@@ -58,7 +58,7 @@ async function callGemini(
       : undefined;
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash-preview-05-20",
+    model: "gemini-2.0-flash",
     systemInstruction: systemMsg?.content || undefined,
     tools: geminiTools,
   });
@@ -76,42 +76,26 @@ async function callGemini(
     } else if (msg.role === "assistant") {
       if (msg.tool_calls && msg.tool_calls.length > 0) {
         const parts: any[] = [];
-        if (msg.content) {
-          parts.push({ text: msg.content });
-        }
+        if (msg.content) parts.push({ text: msg.content });
         for (const tc of msg.tool_calls) {
           let args = {};
-          try {
-            args = JSON.parse(tc.function.arguments);
-          } catch {}
-          parts.push({
-            functionCall: { name: tc.function.name, args },
-          });
+          try { args = JSON.parse(tc.function.arguments); } catch {}
+          parts.push({ functionCall: { name: tc.function.name, args } });
         }
         geminiHistory.push({ role: "model", parts });
       } else {
-        geminiHistory.push({
-          role: "model",
-          parts: [{ text: msg.content || "" }],
-        });
+        geminiHistory.push({ role: "model", parts: [{ text: msg.content || "" }] });
       }
     } else if (msg.role === "tool") {
-      let response = {};
-      try {
-        response = JSON.parse(msg.content);
-      } catch {
-        response = { result: msg.content };
-      }
+      // THIS IS THE FIX - Gemini expects "output" not "response"
+      let output: any = {};
+      try { output = JSON.parse(msg.content); } catch { output = { result: msg.content }; }
       const toolCall = messages.find(
-        (m) =>
-          m.role === "assistant" &&
-          m.tool_calls?.some((tc: any) => tc.id === msg.tool_call_id)
+        (m) => m.role === "assistant" && m.tool_calls?.some((tc: any) => tc.id === msg.tool_call_id)
       );
-      const funcName =
-        toolCall?.tool_calls?.find((tc: any) => tc.id === msg.tool_call_id)
-          ?.function?.name || "unknown";
+      const funcName = toolCall?.tool_calls?.find((tc: any) => tc.id === msg.tool_call_id)?.function?.name || "unknown";
       pendingParts.push({
-        functionResponse: { name: funcName, response },
+        functionResponse: { name: funcName, response: { name: funcName, content: output } },
       });
     }
   }
@@ -125,11 +109,19 @@ async function callGemini(
     geminiHistory.push({ role: "user", parts: [{ text: "Continue." }] });
   }
 
+  // Limit history to last 40 messages to avoid context overflow
+  const trimmedHistory = geminiHistory.length > 40
+    ? geminiHistory.slice(geminiHistory.length - 40)
+    : geminiHistory;
+
+  // Make sure first message is from user
+  if (trimmedHistory.length > 0 && trimmedHistory[0].role !== "user") {
+    trimmedHistory.unshift({ role: "user", parts: [{ text: "Continue our conversation." }] });
+  }
+
   try {
-    const chat = model.startChat({ history: geminiHistory.slice(0, -1) });
-    const lastParts = geminiHistory[geminiHistory.length - 1]?.parts || [
-      { text: "Continue." },
-    ];
+    const chat = model.startChat({ history: trimmedHistory.slice(0, -1) });
+    const lastParts = trimmedHistory[trimmedHistory.length - 1]?.parts || [{ text: "Continue." }];
     const result = await chat.sendMessage(lastParts);
     const resp = result.response;
     const candidates = resp.candidates || [];
@@ -137,23 +129,20 @@ async function callGemini(
     const textParts = parts.filter((p: any) => p.text).map((p: any) => p.text);
     const funcCalls = parts.filter((p: any) => p.functionCall);
 
-    const toolCalls = funcCalls.map((fc: any, i: number) => ({
-      id: `call_${Date.now()}_${i}`,
-      type: "function" as const,
-      function: {
-        name: fc.functionCall.name,
-        arguments: JSON.stringify(fc.functionCall.args || {}),
-      },
-    }));
-
     return {
       content: textParts.join("\n") || null,
-      tool_calls: toolCalls,
+      tool_calls: funcCalls.map((fc: any, i: number) => ({
+        id: `call_${Date.now()}_${i}`,
+        type: "function" as const,
+        function: {
+          name: fc.functionCall.name,
+          arguments: JSON.stringify(fc.functionCall.args || {}),
+        },
+      })),
     };
   } catch (error: any) {
-    // Retry on rate limit with exponential backoff
     if (error.message?.includes("429") && retryCount < 3) {
-      const waitTime = Math.pow(2, retryCount) * 2000; // 2s, 4s, 8s
+      const waitTime = Math.pow(2, retryCount) * 2000;
       console.log(`Gemini rate limited, retrying in ${waitTime}ms...`);
       await sleep(waitTime);
       return callGemini(messages, tools, retryCount + 1);
@@ -162,12 +151,20 @@ async function callGemini(
   }
 }
 
+// Models ordered by tool calling quality - verified available from your check
 const OPENROUTER_MODELS = [
-  "nousresearch/hermes-3-llama-3.1-405b:free",
   "meta-llama/llama-3.3-70b-instruct:free",
-  "mistralai/mistral-small-3.1-24b-instruct:free",
-  "nvidia/nemotron-3-super-120b-a12b:free",
+  "qwen/qwen3-coder:free",
   "openai/gpt-oss-120b:free",
+  "qwen/qwen3-next-80b-a3b-instruct:free",
+  "minimax/minimax-m2.5:free",
+  "z-ai/glm-4.5-air:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "stepfun/step-3.5-flash:free",
+  "qwen/qwen3.6-plus-preview:free",
+  "google/gemma-3-27b-it:free",
+  "arcee-ai/trinity-large-preview:free",
+  "openai/gpt-oss-20b:free",
 ];
 
 async function callOpenRouter(
@@ -189,21 +186,18 @@ async function callOpenRouter(
         body.tool_choice = "auto";
       }
 
-      const res = await fetch(
-        "https://openrouter.ai/api/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${OPENROUTER_KEY}`,
-          },
-          body: JSON.stringify(body),
-        }
-      );
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${OPENROUTER_KEY}`,
+        },
+        body: JSON.stringify(body),
+      });
 
       if (!res.ok) {
         const errorText = await res.text();
-        lastError = `${model}: ${res.status} ${errorText}`;
+        lastError = `${model}: ${res.status}`;
         console.error(`OpenRouter ${model} failed:`, lastError);
         continue;
       }
@@ -211,7 +205,7 @@ async function callOpenRouter(
       const data = await res.json();
       const msg = data.choices?.[0]?.message;
       if (!msg) {
-        lastError = `${model}: no message in response`;
+        lastError = `${model}: no message`;
         continue;
       }
 
@@ -229,7 +223,6 @@ async function callOpenRouter(
       };
     } catch (error: any) {
       lastError = `${model}: ${error.message}`;
-      console.error(`OpenRouter ${model} error:`, error.message);
       continue;
     }
   }
@@ -242,7 +235,6 @@ async function callGroq(
   tools: ToolDef[]
 ): Promise<LLMResponse> {
   const groq = new Groq({ apiKey: GROQ_KEY });
-
   const response = await groq.chat.completions.create({
     model: "llama-3.3-70b-versatile",
     messages: messages as any,
@@ -270,7 +262,6 @@ export async function chatCompletion(
   messages: ChatMessage[],
   tools: ToolDef[]
 ): Promise<LLMResponse> {
-  // Try Gemini first (highest free tier)
   if (GOOGLE_AI_KEY) {
     try {
       return await callGemini(messages, tools);
@@ -279,7 +270,6 @@ export async function chatCompletion(
     }
   }
 
-  // Try OpenRouter second (multiple free models)
   if (OPENROUTER_KEY) {
     try {
       return await callOpenRouter(messages, tools);
@@ -288,7 +278,6 @@ export async function chatCompletion(
     }
   }
 
-  // Try Groq last
   if (GROQ_KEY) {
     try {
       return await callGroq(messages, tools);
@@ -297,7 +286,5 @@ export async function chatCompletion(
     }
   }
 
-  throw new Error(
-    "All AI providers failed or none configured. Check your API keys."
-  );
+  throw new Error("All AI providers failed or none configured.");
 }
