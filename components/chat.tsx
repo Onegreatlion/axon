@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
-  Send, Loader2, User, Trash2, Mic, MicOff, Plus, Copy,
+  Send, Loader2, User, Trash2, Mic, MicOff, Plus, Volume2, Copy,
   Check, ChevronDown, ArrowDown, Square,
 } from "lucide-react";
 import Markdown from "@/components/markdown";
@@ -235,6 +235,34 @@ export default function Chat() {
     recognition.start();
   }
 
+  function speakMessage(text: string) {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      // Strip markdown formatting for cleaner speech
+      const cleanText = text
+        .replace(/#{1,6}\s/g, '')
+        .replace(/\*\*/g, '')
+        .replace(/\*/g, '')
+        .replace(/`{1,3}[^`]*`{1,3}/g, '')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/[-*]\s/g, '')
+        .replace(/\n{2,}/g, '. ')
+        .replace(/\n/g, ' ');
+      
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.rate = 1.05;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      
+      // Try to use a natural voice
+      const voices = window.speechSynthesis.getVoices();
+      const preferred = voices.find(v => v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Daniel'));
+      if (preferred) utterance.voice = preferred;
+      
+      window.speechSynthesis.speak(utterance);
+    }
+  }
+
   function stopListening() {
     if (recognitionRef.current) {
       recognitionRef.current.onresult = null;
@@ -365,18 +393,21 @@ export default function Chat() {
                     {message.role === "user" ? <User className="w-3.5 h-3.5 text-zinc-400" /> : <div className="w-3 h-3 rounded bg-amber-500/90" />}
                   </div>
                   <div className="flex-1 min-w-0 pt-0.5">
-                    <div className="flex items-center gap-2 mb-1">
+                     <div className="flex items-center gap-2 mb-1">
                       <p className="text-xs font-medium text-zinc-500">{message.role === "user" ? "You" : "Axon"}</p>
                       <span className="text-[10px] text-zinc-700">{formatTime(message.timestamp)}</span>
-                      <button onClick={() => copyMessage(message.content, i)} className="opacity-0 group-hover:opacity-100 transition-opacity text-zinc-700 hover:text-zinc-400 ml-auto" title="Copy">
-                        {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                      </button>
+                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity ml-auto">
+                        {message.role === "assistant" && (
+                          <button onClick={() => speakMessage(message.content)} className="text-zinc-700 hover:text-zinc-400" title="Read aloud">
+                            <Volume2 className="w-3 h-3" />
+                          </button>
+                        )}
+                        <button onClick={() => copyMessage(message.content, i)} className="text-zinc-700 hover:text-zinc-400" title="Copy">
+                          {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                      </div>
                     </div>
-                    {message.role === "assistant" ? (
-                      <Markdown content={message.content} />
-                    ) : (
-                      <div className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap break-words">{message.content}</div>
-                    )}
+                    <Markdown content={message.content} />
                   </div>
                 </div>
               );

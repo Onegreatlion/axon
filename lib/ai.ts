@@ -109,14 +109,32 @@ async function callGemini(
     geminiHistory.push({ role: "user", parts: [{ text: "Continue." }] });
   }
 
-  // Limit history to last 40 messages to avoid context overflow
-  const trimmedHistory = geminiHistory.length > 40
-    ? geminiHistory.slice(geminiHistory.length - 40)
-    : geminiHistory;
-
-  // Make sure first message is from user
-  if (trimmedHistory.length > 0 && trimmedHistory[0].role !== "user") {
-    trimmedHistory.unshift({ role: "user", parts: [{ text: "Continue our conversation." }] });
+    // Smart context: keep recent messages, summarize older ones
+  let trimmedHistory = geminiHistory;
+  if (geminiHistory.length > 30) {
+    const oldMessages = geminiHistory.slice(0, geminiHistory.length - 20);
+    const recentMessages = geminiHistory.slice(geminiHistory.length - 20);
+    
+    // Build a summary of older context
+    const oldTexts: string[] = [];
+    for (const msg of oldMessages) {
+      if (msg.parts) {
+        for (const part of msg.parts) {
+          if (part.text) oldTexts.push(`[${msg.role}]: ${part.text.substring(0, 200)}`);
+          if (part.functionCall) oldTexts.push(`[tool call]: ${part.functionCall.name}`);
+          if (part.functionResponse) oldTexts.push(`[tool result]: ${part.functionResponse.name}`);
+        }
+      }
+    }
+    
+    const contextSummary = {
+      role: "user" as const,
+      parts: [{
+        text: `[CONVERSATION CONTEXT - Summary of ${oldMessages.length} earlier messages]\n${oldTexts.slice(-30).join("\n")}\n[END CONTEXT - Recent conversation follows]`
+      }]
+    };
+    
+    trimmedHistory = [contextSummary, ...recentMessages];
   }
 
   try {
