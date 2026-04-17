@@ -20,9 +20,16 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      # This is the specific build command for Next.js on Cloudflare
+      # Update this specific step in your deploy.yml
       - name: Build Next.js for Cloudflare
         run: npx @cloudflare/next-on-pages@1
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN }}
+          AUTH0_CLIENT_ID: ${{ secrets.AUTH0_CLIENT_ID }}
+          AUTH0_SECRET: ${{ secrets.AUTH0_SECRET }}
+          # Note: If you have an AUTH0_CLIENT_SECRET, add it here too!
 
       - name: Publish to Cloudflare Pages
         uses: cloudflare/pages-action@v1
