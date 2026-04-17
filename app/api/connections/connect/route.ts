@@ -1,7 +1,6 @@
 export const runtime = 'edge';
 import { NextRequest, NextResponse } from "next/server";
 import { auth0 } from "@/lib/auth0";
-import crypto from "crypto";
 
 const DOMAIN = process.env.AUTH0_DOMAIN!;
 const CLIENT_ID = process.env.AUTH0_CLIENT_ID!;
@@ -60,7 +59,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const state = crypto.randomBytes(16).toString("hex");
+    const state = crypto.randomUUID();
     const redirectUri = `${APP_BASE_URL}/api/connections/callback`;
 
     let scopes: string[] | undefined;
