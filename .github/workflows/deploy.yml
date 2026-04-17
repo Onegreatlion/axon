@@ -1,0 +1,34 @@
+name: Deploy Axon to Cloudflare Pages
+
+on:
+  push:
+    branches:
+      - main # Change to 'master' if your main branch is called master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      # This is the specific build command for Next.js on Cloudflare
+      - name: Build Next.js for Cloudflare
+        run: npx @cloudflare/next-on-pages@1
+
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: axon # Must match the exact name in Cloudflare
+          directory: .vercel/output/static # This is where next-on-pages puts the build
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
