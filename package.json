@@ -2,7 +2,7 @@
   "name": "axon",
   "version": "0.1.0",
   "private": true,
- "scripts": {
+  "scripts": {
     "dev": "next dev",
     "build": "next build",
     "pages:build": "npx @cloudflare/next-on-pages",
@@ -18,7 +18,7 @@
     "clsx": "^2.1.1",
     "groq-sdk": "^1.1.1",
     "lucide-react": "^0.577.0",
-    "next": "16.1.7",
+    "next": "^15.5.2",
     "openai": "^6.33.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
