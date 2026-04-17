@@ -1,3 +1,4 @@
+export const runtime = 'edge';
 import { auth0 } from "@/lib/auth0";
 import { supabaseAdmin } from "@/lib/supabase";
 import { isConnectionActive } from "@/lib/token-vault";

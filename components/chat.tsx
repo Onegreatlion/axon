@@ -31,6 +31,7 @@ export default function Chat() {
   const [currentSessionId, setCurrentSessionId] = useState("");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [statusText, setStatusText] = useState(""); // NEW: Tracks Axon's internal thoughts
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [showClearDialog, setShowClearDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState<string | null>(null);
@@ -47,7 +48,6 @@ export default function Chat() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const saveTimerRef = useRef<any>(null);
 
-  // Load sessions from Supabase on mount
   useEffect(() => {
     loadSessions();
   }, []);
@@ -60,7 +60,6 @@ export default function Chat() {
         setSessions(data.sessions);
         setCurrentSessionId(data.sessions[0].id);
       } else {
-        // Create first session
         const createRes = await fetch("/api/chat-sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -79,7 +78,6 @@ export default function Chat() {
     }
   }
 
-  // Debounced save to Supabase
   function saveToSupabase(sessionId: string, messages: Message[], name?: string) {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
@@ -107,7 +105,7 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, []);
 
-  useEffect(() => { scrollToBottom(); }, [messages.length, loading, scrollToBottom]);
+  useEffect(() => { scrollToBottom(); }, [messages.length, loading, statusText, scrollToBottom]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -134,7 +132,6 @@ export default function Chat() {
       })
     );
 
-    // Save to Supabase
     saveToSupabase(currentSessionId, newMessages, newName);
   }
 
@@ -209,9 +206,10 @@ export default function Chat() {
       abortControllerRef.current = null;
     }
     setLoading(false);
+    setStatusText("");
   }
 
-        function toggleListening() {
+  function toggleListening() {
     if (isListening) { stopListening(); return; }
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) { alert("Speech recognition not supported in this browser."); return; }
@@ -238,7 +236,6 @@ export default function Chat() {
   function speakMessage(text: string) {
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      // Strip markdown formatting for cleaner speech
       const cleanText = text
         .replace(/#{1,6}\s/g, '')
         .replace(/\*\*/g, '')
@@ -254,7 +251,6 @@ export default function Chat() {
       utterance.pitch = 1;
       utterance.volume = 1;
       
-      // Try to use a natural voice
       const voices = window.speechSynthesis.getVoices();
       const preferred = voices.find(v => v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Daniel'));
       if (preferred) utterance.voice = preferred;
@@ -272,16 +268,22 @@ export default function Chat() {
     }
     setIsListening(false);
   }
+
+  // --- NEW STREAMING FETCH LOGIC ---
   async function handleSend() {
     const text = input.trim();
     if (!text || loading) return;
+    
     sendingRef.current = true;
     stopListening();
+    
     const userMessage: Message = { role: "user", content: text, timestamp: Date.now() };
     const newMessages = [...messages, userMessage];
     updateMessages(newMessages);
+    
     setInput("");
     setLoading(true);
+    setStatusText("Thinking...");
     setTimeout(() => { sendingRef.current = false; }, 500);
 
     const controller = new AbortController();
@@ -294,27 +296,49 @@ export default function Chat() {
         body: JSON.stringify({ messages: newMessages.map((m) => ({ role: m.role, content: m.content })) }),
         signal: controller.signal,
       });
-      const data = await res.json();
-      const finalMessages = [...newMessages, {
-        role: "assistant" as const,
-        content: data.error
-          ? "I could not process that request right now. Please try again in a moment."
-          : data.message,
-        timestamp: Date.now(),
-      }];
-      updateMessages(finalMessages);
+
+      if (!res.body) throw new Error("No response body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n').filter(Boolean);
+
+          for (const line of lines) {
+            try {
+              const data = JSON.parse(line);
+              
+              if (data.type === "status") {
+                setStatusText(data.message);
+              } else if (data.type === "final") {
+                setStatusText("");
+                updateMessages([...newMessages, { role: "assistant", content: data.message, timestamp: Date.now() }]);
+              } else if (data.type === "error") {
+                setStatusText("");
+                updateMessages([...newMessages, { role: "assistant", content: `Error: ${data.message}`, timestamp: Date.now() }]);
+              }
+            } catch (e) {
+              console.error("Error parsing stream chunk", e, line);
+            }
+          }
+        }
+      }
     } catch (err: any) {
       if (err.name === "AbortError") {
-        updateMessages([...newMessages, {
-          role: "assistant", content: "Response generation was stopped.", timestamp: Date.now(),
-        }]);
+        updateMessages([...newMessages, { role: "assistant", content: "Response generation was stopped.", timestamp: Date.now() }]);
       } else {
-        updateMessages([...newMessages, {
-          role: "assistant", content: "Could not reach the server. Please try again.", timestamp: Date.now(),
-        }]);
+        updateMessages([...newMessages, { role: "assistant", content: "Could not reach the server. Please try again.", timestamp: Date.now() }]);
       }
     } finally {
       setLoading(false);
+      setStatusText("");
       abortControllerRef.current = null;
       textareaRef.current?.focus();
     }
@@ -413,6 +437,7 @@ export default function Chat() {
               );
             })}
 
+            {/* NEW STREAMING STATUS UI */}
             {loading && (
               <div className="flex gap-3">
                 <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0 mt-0.5">
@@ -421,7 +446,7 @@ export default function Chat() {
                 <div className="flex-1 pt-0.5">
                   <p className="text-xs font-medium text-zinc-500 mb-1">Axon</p>
                   <div className="flex items-center gap-2 text-sm text-zinc-500">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Working on it...
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> {statusText || "Working on it..."}
                   </div>
                 </div>
               </div>

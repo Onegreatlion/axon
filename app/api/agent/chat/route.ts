@@ -1,3 +1,4 @@
+export const runtime = 'edge';
 import { NextRequest, NextResponse } from "next/server";
 import { auth0 } from "@/lib/auth0";
 import { getConnectionToken } from "@/lib/token-vault";
@@ -26,12 +27,17 @@ function getServiceName(toolName: string): string {
   if (toolName.includes("task")) return "tasks";
   if (toolName.includes("contact")) return "contacts";
   if (GITHUB_TOOL_NAMES.includes(toolName)) return "github";
+  if (toolName === "post_to_x") return "twitter"; 
+  if (toolName === "post_to_facebook") return "facebook";
+  if (toolName === "send_telegram_message") return "telegram";
   return "gmail";
 }
 
 function getConnectionForTool(toolName: string): string {
   if (GITHUB_TOOL_NAMES.includes(toolName)) return "github";
-  return "google-oauth2";
+  if (toolName === "post_to_x") return "twitter"; 
+  if (toolName === "post_to_facebook") return "facebook";
+  return "google-oauth2"; // Telegram doesn't use Auth0, handled separately
 }
 
 const TOOLS = [
@@ -338,6 +344,50 @@ const TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "post_to_x",
+      description: "Post a tweet to the user's connected X (Twitter) account. Use this to share updates or thoughts.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "The content of the tweet (max 280 characters)" },
+        },
+        required: ["text"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "post_to_facebook",
+      description: "Post a status update to the user's connected Facebook Page.",
+      parameters: {
+        type: "object",
+        properties: {
+          page_id: { type: "string", description: "The ID of the Facebook Page" },
+          message: { type: "string", description: "The content of the post" },
+        },
+        required: ["page_id", "message"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "send_telegram_message",
+      description: "Send a message via Telegram. Use this to alert the user of important events or task completion.",
+      parameters: {
+        type: "object",
+        properties: {
+          chat_id: { type: "string", description: "The user's Telegram Chat ID provided in the system prompt" },
+          text: { type: "string", description: "The message to send" },
+        },
+        required: ["chat_id", "text"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "daily_briefing",
       description: "Generate a comprehensive daily briefing across all connected services. Checks unread emails, today's calendar, pending tasks, and GitHub notifications.",
       parameters: { type: "object", properties: {}, required: [] },
@@ -346,16 +396,17 @@ const TOOLS = [
 ];
 
 async function getUserProfile(auth0Id: string) {
+  // Added telegram_chat_id to the select query
   let { data: profile } = await supabaseAdmin
     .from("user_profiles")
-    .select("id, mode, tone")
+    .select("id, mode, tone, telegram_chat_id")
     .eq("auth0_id", auth0Id)
     .single();
   if (!profile) {
     const { data: newProfile } = await supabaseAdmin
       .from("user_profiles")
       .insert({ auth0_id: auth0Id, display_name: "", email: "" })
-      .select("id, mode, tone")
+      .select("id, mode, tone, telegram_chat_id")
       .single();
     profile = newProfile;
   }
@@ -405,12 +456,18 @@ function checkConstitutionRules(
       blocked = true;
       explanation = `Blocked by constitution rule: "${rule.rule_text}".`;
     }
+    if (toolName === "post_to_x" && (lower.includes("no twitter") || lower.includes("no x") || lower.includes("never tweet"))) {
+      appliedRules.push(rule.rule_text);
+      blocked = true;
+      explanation = `Blocked by constitution rule: "${rule.rule_text}".`;
+    }
   }
   return { blocked, appliedRules, explanation };
 }
 
-function buildSystemPrompt(rules: { id: string; rule_text: string }[], mode: string, tone: string): string {
-  let prompt = `You are Axon, an autonomous AI agent managing a user's digital life. You have access to Gmail, Calendar, Drive, GitHub, Tasks, and Contacts through Auth0 Token Vault.
+// Passed telegramChatId to system prompt
+function buildSystemPrompt(rules: { id: string; rule_text: string }[], mode: string, tone: string, telegramChatId?: string): string {
+  let prompt = `You are Axon, an autonomous AI agent managing a user's digital life. You have access to Gmail, Calendar, Drive, GitHub, Tasks, Twitter (X), Facebook, Telegram, and Contacts.
 
 Operating Mode: ${mode?.toUpperCase() || "ASSIST"}
 ${mode === "shadow"
@@ -425,13 +482,14 @@ ${mode === "shadow"
 - Only pause for: emails to new recipients, financial content, destructive actions, constitution violations`
   : `ASSIST MODE: Observe freely. Draft before sending. Ask approval for modifications. Be proactive about suggesting next actions.`}
 
-You have 21 tools available. Use them aggressively to be helpful:
+You have 24 tools available. Use them aggressively to be helpful:
 - EMAIL: get_email_count, list_emails, search_emails, draft_email, send_email, archive_emails, mark_emails_read
 - CALENDAR: list_calendar_events, create_calendar_event
 - DRIVE: list_drive_files, search_drive_files
 - GITHUB: list_repos, list_issues, list_pull_requests, get_notifications, create_issue, add_comment
 - TASKS: list_tasks, create_task, complete_task
 - CONTACTS: search_contacts
+- SOCIAL: post_to_x, post_to_facebook, send_telegram_message
 - META: daily_briefing
 
 Key behaviors:
@@ -442,6 +500,11 @@ Key behaviors:
 - Use markdown formatting with headers, bullets, and bold for clarity
 - Be concise but thorough
 - Current time: ${new Date().toISOString()}`;
+
+  // If we have a Telegram ID, explicitly instruct the AI to use it!
+  if (telegramChatId) {
+    prompt += `\n\nCRITICAL SYSTEM NOTE: The user has connected their Telegram account. Their unique Chat ID is: ${telegramChatId}. When sending a Telegram message using the send_telegram_message tool, you MUST pass this exact ID into the 'chat_id' parameter.`;
+  }
 
   if (rules.length > 0) {
     prompt += `\n\nConstitution (MUST obey):`;
@@ -499,11 +562,61 @@ async function executeTool(
   }
 
   try {
-    const connection = getConnectionForTool(name);
-    const token = await getConnectionToken(connection);
     let result: string;
 
+    // We handle Telegram BEFORE token fetching because it doesn't use OAuth
+    if (name === "send_telegram_message") {
+      const botToken = process.env.TELEGRAM_BOT_TOKEN; 
+      if (!botToken) {
+        result = JSON.stringify({ error: "Telegram bot token not configured on the server." });
+        return result;
+      }
+
+      const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: args.chat_id,
+          text: args.text,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        result = JSON.stringify({ status: "success", message_id: data.result.message_id });
+      } else {
+        result = JSON.stringify({ error: data.description || "Failed to send Telegram message" });
+      }
+
+      await logAction({ service, actionType: name, riskTier: classification.tier,
+        description: `${name}(${JSON.stringify(args).substring(0, 200)})`,
+        scopesUsed: classification.scopes, status: "executed",
+        reasoning: classification.reasoning, metadata: { args, classification } });
+
+      return result;
+    }
+
+    const connection = getConnectionForTool(name);
+    const token = await getConnectionToken(connection);
+    
     switch (name) {
+      case "post_to_facebook": {
+        const res = await fetch(`https://graph.facebook.com/v19.0/${args.page_id}/feed`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: args.message,
+            access_token: token
+          }),
+        });
+        const data = await res.json();
+        if (data.id) {
+          result = JSON.stringify({ status: "success", post_id: data.id });
+        } else {
+          result = JSON.stringify({ error: data.error?.message || "Failed to post to Facebook" });
+        }
+        break;
+      }
       case "get_email_count": {
         const count = await getEmailCount(token);
         result = JSON.stringify(count);
@@ -646,6 +759,31 @@ async function executeTool(
         result = JSON.stringify(contacts);
         break;
       }
+      case "post_to_x": {
+        const res = await fetch("https://api.twitter.com/2/tweets", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ text: args.text }),
+        });
+
+        const data = await res.json();
+        
+        if (res.ok && data.data) {
+          result = JSON.stringify({ 
+            status: "success", 
+            message: `Successfully tweeted!`,
+            tweet_id: data.data.id
+          });
+        } else {
+          result = JSON.stringify({ 
+            error: data.detail || "Failed to post to X. Ensure your Twitter account is connected in the Services tab." 
+          });
+        }
+        break;
+      }
       case "daily_briefing": {
         const googleToken = await getConnectionToken("google-oauth2");
         const briefing: any = {};
@@ -690,43 +828,80 @@ export async function POST(request: NextRequest) {
     const rules = await getConstitutionRules(profile.id);
     const mode = profile.mode || "assist";
     const tone = profile.tone || "professional";
-    const systemPrompt = buildSystemPrompt(rules, mode, tone);
+    
+    // We pass the telegram chat ID into the system prompt builder!
+    const systemPrompt = buildSystemPrompt(rules, mode, tone, profile.telegram_chat_id);
 
     const chatMessages = [
       { role: "system" as const, content: systemPrompt },
       ...messages,
     ];
 
-    let aiResponse = await chatCompletion(chatMessages, TOOLS);
-    let assistantMessage: any = {
-      role: "assistant" as const,
-      content: aiResponse.content,
-      tool_calls: aiResponse.tool_calls.length > 0 ? aiResponse.tool_calls : undefined,
-    };
+    const encoder = new TextEncoder();
 
-    let iterations = 0;
-    while (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0 && iterations < 8) {
-      chatMessages.push(assistantMessage);
-      for (const toolCall of assistantMessage.tool_calls) {
-        let result: string;
+    const stream = new ReadableStream({
+      async start(controller) {
         try {
-          const args = JSON.parse(toolCall.function.arguments);
-          result = await executeTool(toolCall.function.name, args, profile.id, rules, mode);
-        } catch (error: any) {
-          result = JSON.stringify({ error: error.message });
-        }
-        chatMessages.push({ role: "tool" as const, tool_call_id: toolCall.id, content: result });
-      }
-      aiResponse = await chatCompletion(chatMessages, TOOLS);
-      assistantMessage = {
-        role: "assistant" as const,
-        content: aiResponse.content,
-        tool_calls: aiResponse.tool_calls.length > 0 ? aiResponse.tool_calls : undefined,
-      };
-      iterations++;
-    }
+          let aiResponse = await chatCompletion(chatMessages, TOOLS);
+          let assistantMessage: any = {
+            role: "assistant" as const,
+            content: aiResponse.content,
+            tool_calls: aiResponse.tool_calls.length > 0 ? aiResponse.tool_calls : undefined,
+          };
 
-    return NextResponse.json({ message: assistantMessage.content });
+          let iterations = 0;
+          while (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0 && iterations < 8) {
+            chatMessages.push(assistantMessage);
+            
+            for (const toolCall of assistantMessage.tool_calls) {
+              const friendlyName = toolCall.function.name.replace(/_/g, ' ');
+              const statusUpdate = JSON.stringify({ 
+                type: "status", 
+                message: `Axon is executing: ${friendlyName}...` 
+              }) + '\n';
+              controller.enqueue(encoder.encode(statusUpdate));
+
+              let result: string;
+              try {
+                const args = JSON.parse(toolCall.function.arguments);
+                result = await executeTool(toolCall.function.name, args, profile.id, rules, mode);
+              } catch (error: any) {
+                result = JSON.stringify({ error: error.message });
+              }
+              chatMessages.push({ role: "tool" as const, tool_call_id: toolCall.id, content: result });
+            }
+            
+            aiResponse = await chatCompletion(chatMessages, TOOLS);
+            assistantMessage = {
+              role: "assistant" as const,
+              content: aiResponse.content,
+              tool_calls: aiResponse.tool_calls.length > 0 ? aiResponse.tool_calls : undefined,
+            };
+            iterations++;
+          }
+
+          const finalUpdate = JSON.stringify({ 
+            type: "final", 
+            message: assistantMessage.content || "Done." 
+          }) + '\n';
+          controller.enqueue(encoder.encode(finalUpdate));
+          controller.close();
+          
+        } catch (error: any) {
+          controller.enqueue(encoder.encode(JSON.stringify({ type: "error", message: error.message }) + '\n'));
+          controller.close();
+        }
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive"
+      }
+    });
+
   } catch (error: any) {
     console.error("Agent error:", error);
     return NextResponse.json({ error: error.message || "Agent error" }, { status: 500 });

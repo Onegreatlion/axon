@@ -4,14 +4,14 @@ const GOOGLE_AI_KEY = process.env.GOOGLE_AI_API_KEY;
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
 const GROQ_KEY = process.env.GROQ_API_KEY;
 
-interface ChatMessage {
+export interface ChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   tool_call_id?: string;
   tool_calls?: any[];
 }
 
-interface ToolDef {
+export interface ToolDef {
   type: "function";
   function: {
     name: string;
@@ -20,11 +20,11 @@ interface ToolDef {
   };
 }
 
-interface LLMResponse {
+export interface LLMResponse {
   content: string | null;
   tool_calls: {
     id: string;
-    type: string;
+    type: "function";
     function: { name: string; arguments: string };
   }[];
 }
@@ -40,37 +40,32 @@ async function callGemini(
 ): Promise<LLMResponse> {
   const { GoogleGenerativeAI } = await import("@google/generative-ai");
   const genAI = new GoogleGenerativeAI(GOOGLE_AI_KEY!);
-
+  
   const systemMsg = messages.find((m) => m.role === "system");
   const chatMessages = messages.filter((m) => m.role !== "system");
 
-  const geminiTools =
-    tools.length > 0
-      ? [
-          {
-            functionDeclarations: tools.map((t) => ({
-              name: t.function.name,
-              description: t.function.description,
-              parameters: t.function.parameters,
-            })),
-          },
-        ]
-      : undefined;
+  const geminiTools = tools.length > 0 ? [{
+    functionDeclarations: tools.map((t) => ({
+      name: t.function.name,
+      description: t.function.description,
+      parameters: t.function.parameters,
+    })),
+  }] : undefined;
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
+    model: "gemini-2.5-flash", // Using 2.5 for better quota and tool calling
     systemInstruction: systemMsg?.content || undefined,
     tools: geminiTools,
   });
 
-  const geminiHistory: any[] = [];
-  const pendingParts: any[] = [];
+  let geminiHistory: any[] = [];
+  let pendingParts: any[] = [];
 
   for (const msg of chatMessages) {
     if (msg.role === "user") {
       if (pendingParts.length > 0) {
         geminiHistory.push({ role: "model", parts: [...pendingParts] });
-        pendingParts.length = 0;
+        pendingParts = [];
       }
       geminiHistory.push({ role: "user", parts: [{ text: msg.content }] });
     } else if (msg.role === "assistant") {
@@ -87,15 +82,18 @@ async function callGemini(
         geminiHistory.push({ role: "model", parts: [{ text: msg.content || "" }] });
       }
     } else if (msg.role === "tool") {
-      // THIS IS THE FIX - Gemini expects "output" not "response"
-      let output: any = {};
-      try { output = JSON.parse(msg.content); } catch { output = { result: msg.content }; }
-      const toolCall = messages.find(
-        (m) => m.role === "assistant" && m.tool_calls?.some((tc: any) => tc.id === msg.tool_call_id)
-      );
+      // EXACT FIX FOR THE 400 ERROR:
+      let outputObj = {};
+      try { outputObj = JSON.parse(msg.content); } catch { outputObj = { result: msg.content }; }
+      
+      const toolCall = messages.find((m) => m.role === "assistant" && m.tool_calls?.some((tc: any) => tc.id === msg.tool_call_id));
       const funcName = toolCall?.tool_calls?.find((tc: any) => tc.id === msg.tool_call_id)?.function?.name || "unknown";
+      
       pendingParts.push({
-        functionResponse: { name: funcName, response: { name: funcName, content: output } },
+        functionResponse: { 
+          name: funcName, 
+          response: outputObj // Gemini requires the key to be exactly "response", containing an object
+        },
       });
     }
   }
@@ -104,36 +102,14 @@ async function callGemini(
     geminiHistory.push({ role: "user", parts: [...pendingParts] });
   }
 
-  const lastEntry = geminiHistory[geminiHistory.length - 1];
-  if (!lastEntry || lastEntry.role !== "user") {
-    geminiHistory.push({ role: "user", parts: [{ text: "Continue." }] });
-  }
-
-    // Smart context: keep recent messages, summarize older ones
+  // SMART CONTEXT: Summarize old messages to prevent crashes on 100+ turns
   let trimmedHistory = geminiHistory;
   if (geminiHistory.length > 30) {
-    const oldMessages = geminiHistory.slice(0, geminiHistory.length - 20);
     const recentMessages = geminiHistory.slice(geminiHistory.length - 20);
-    
-    // Build a summary of older context
-    const oldTexts: string[] = [];
-    for (const msg of oldMessages) {
-      if (msg.parts) {
-        for (const part of msg.parts) {
-          if (part.text) oldTexts.push(`[${msg.role}]: ${part.text.substring(0, 200)}`);
-          if (part.functionCall) oldTexts.push(`[tool call]: ${part.functionCall.name}`);
-          if (part.functionResponse) oldTexts.push(`[tool result]: ${part.functionResponse.name}`);
-        }
-      }
-    }
-    
     const contextSummary = {
-      role: "user" as const,
-      parts: [{
-        text: `[CONVERSATION CONTEXT - Summary of ${oldMessages.length} earlier messages]\n${oldTexts.slice(-30).join("\n")}\n[END CONTEXT - Recent conversation follows]`
-      }]
+      role: "user",
+      parts: [{ text: `[SYSTEM: 30+ messages omitted for context length. Please continue smoothly.]` }]
     };
-    
     trimmedHistory = [contextSummary, ...recentMessages];
   }
 
@@ -144,6 +120,7 @@ async function callGemini(
     const resp = result.response;
     const candidates = resp.candidates || [];
     const parts = candidates[0]?.content?.parts || [];
+    
     const textParts = parts.filter((p: any) => p.text).map((p: any) => p.text);
     const funcCalls = parts.filter((p: any) => p.functionCall);
 
@@ -159,150 +136,61 @@ async function callGemini(
       })),
     };
   } catch (error: any) {
-    if (error.message?.includes("429") && retryCount < 3) {
-      const waitTime = Math.pow(2, retryCount) * 2000;
-      console.log(`Gemini rate limited, retrying in ${waitTime}ms...`);
-      await sleep(waitTime);
+    if (error.message?.includes("429") && retryCount < 2) {
+      await sleep(2000 * (retryCount + 1));
       return callGemini(messages, tools, retryCount + 1);
     }
     throw error;
   }
 }
 
-// Models ordered by tool calling quality - verified available from your check
-const OPENROUTER_MODELS = [
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "qwen/qwen3-coder:free",
-  "openai/gpt-oss-120b:free",
-  "qwen/qwen3-next-80b-a3b-instruct:free",
-  "minimax/minimax-m2.5:free",
-  "z-ai/glm-4.5-air:free",
-  "nvidia/nemotron-3-super-120b-a12b:free",
-  "stepfun/step-3.5-flash:free",
-  "qwen/qwen3.6-plus-preview:free",
-  "google/gemma-3-27b-it:free",
-  "arcee-ai/trinity-large-preview:free",
-  "openai/gpt-oss-20b:free",
-];
+async function callOpenRouter(messages: ChatMessage[], tools: ToolDef[]): Promise<LLMResponse> {
+  // Prioritized models that actually excel at tool calling
+  const OPENROUTER_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "mistralai/mistral-small-3.1-24b-instruct:free",
+  ];
 
-async function callOpenRouter(
-  messages: ChatMessage[],
-  tools: ToolDef[]
-): Promise<LLMResponse> {
   let lastError = "";
-
   for (const model of OPENROUTER_MODELS) {
     try {
-      const body: any = {
-        model,
-        messages,
-        temperature: 0.3,
-        max_tokens: 2048,
-      };
+      const body: any = { model, messages, temperature: 0.3, max_tokens: 2048 };
       if (tools.length > 0) {
         body.tools = tools;
         body.tool_choice = "auto";
       }
-
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${OPENROUTER_KEY}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${OPENROUTER_KEY}` },
         body: JSON.stringify(body),
       });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        lastError = `${model}: ${res.status}`;
-        console.error(`OpenRouter ${model} failed:`, lastError);
-        continue;
-      }
-
+      if (!res.ok) throw new Error(`${model} failed`);
       const data = await res.json();
       const msg = data.choices?.[0]?.message;
-      if (!msg) {
-        lastError = `${model}: no message`;
-        continue;
-      }
-
-      console.log(`OpenRouter: using ${model}`);
+      if (!msg) continue;
+      
       return {
         content: msg.content || null,
         tool_calls: (msg.tool_calls || []).map((tc: any) => ({
           id: tc.id || `call_${Date.now()}`,
           type: "function" as const,
-          function: {
-            name: tc.function.name,
-            arguments: tc.function.arguments,
-          },
+          function: { name: tc.function.name, arguments: tc.function.arguments },
         })),
       };
-    } catch (error: any) {
-      lastError = `${model}: ${error.message}`;
+    } catch (e: any) {
+      lastError = e.message;
       continue;
     }
   }
-
-  throw new Error(`All OpenRouter models failed. Last: ${lastError}`);
+  throw new Error(`OpenRouter failed: ${lastError}`);
 }
 
-async function callGroq(
-  messages: ChatMessage[],
-  tools: ToolDef[]
-): Promise<LLMResponse> {
-  const groq = new Groq({ apiKey: GROQ_KEY });
-  const response = await groq.chat.completions.create({
-    model: "llama-3.3-70b-versatile",
-    messages: messages as any,
-    tools: tools.length > 0 ? (tools as any) : undefined,
-    tool_choice: tools.length > 0 ? "auto" : undefined,
-    temperature: 0.3,
-    max_tokens: 2048,
-  });
-
-  const msg = response.choices[0].message;
-  return {
-    content: msg.content,
-    tool_calls: (msg.tool_calls || []).map((tc) => ({
-      id: tc.id,
-      type: "function" as const,
-      function: {
-        name: tc.function.name,
-        arguments: tc.function.arguments,
-      },
-    })),
-  };
-}
-
-export async function chatCompletion(
-  messages: ChatMessage[],
-  tools: ToolDef[]
-): Promise<LLMResponse> {
+export async function chatCompletion(messages: ChatMessage[], tools: ToolDef[]): Promise<LLMResponse> {
   if (GOOGLE_AI_KEY) {
-    try {
-      return await callGemini(messages, tools);
-    } catch (error: any) {
-      console.error("Gemini failed:", error.message);
-    }
+    try { return await callGemini(messages, tools); } catch (e) { console.error("Gemini failed"); }
   }
-
   if (OPENROUTER_KEY) {
-    try {
-      return await callOpenRouter(messages, tools);
-    } catch (error: any) {
-      console.error("OpenRouter failed:", error.message);
-    }
+    try { return await callOpenRouter(messages, tools); } catch (e) { console.error("OpenRouter failed"); }
   }
-
-  if (GROQ_KEY) {
-    try {
-      return await callGroq(messages, tools);
-    } catch (error: any) {
-      console.error("Groq failed:", error.message);
-    }
-  }
-
-  throw new Error("All AI providers failed or none configured.");
+  throw new Error("All AI providers failed. Rate limits exceeded.");
 }

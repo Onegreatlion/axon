@@ -1,3 +1,4 @@
+export const runtime = 'edge';
 import { NextRequest, NextResponse } from "next/server";
 import { getConnectionToken } from "@/lib/token-vault";
 import { listEmails, sendEmail, getEmailCount } from "@/lib/services/gmail";
